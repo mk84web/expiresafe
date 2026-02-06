@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Subscriptions | Admin | ExpireSafe{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-4">Subscriptions</h1>
+
+<div class="bg-white dark:bg-slate-800 rounded shadow overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead class="bg-slate-100 dark:bg-slate-700">
+      <tr>
+        <th class="p-3 text-left">Agency</th>
+        <th class="p-3 text-center">Country</th>
+        <th class="p-3 text-center">Plan</th>
+        <th class="p-3 text-center">Status</th>
+        <th class="p-3 text-center">Staff</th>
+        <th class="p-3 text-center">Paid Until</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr class="border-t dark:border-slate-700">
+        <td class="p-3">{{ r.name }}</td>
+        <td class="p-3 text-center">{{ r.country }}</td>
+        <td class="p-3 text-center">{{ r.plan }}</td>
+        <td class="p-3 text-center">
+          {% if r.billing_status == "ACTIVE" %}
+            <span class="px-2 py-1 rounded text-xs font-semibold bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300">ACTIVE</span>
+          {% else %}
+            <span class="px-2 py-1 rounded text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300">INACTIVE</span>
+          {% endif %}
+        </td>
+        <td class="p-3 text-center">{{ r.staff_count }}</td>
+        <td class="p-3 text-center text-slate-500 dark:text-slate-400">{{ r.current_period_end[:10] if r.current_period_end else "—" }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="6" class="p-4 text-center text-slate-400 dark:text-slate-400">No agencies yet.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="mt-4 text-xs text-slate-500 dark:text-slate-400">
+  Total agencies: {{ rows|length }}
+</p>
+{% endblock %}

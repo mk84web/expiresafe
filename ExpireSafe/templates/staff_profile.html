@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}{{ staff.full_name }} | ExpireSafe{% endblock %}
+{% block content %}
+<a href="{{ url_for('staff_list') }}" class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline mb-2 inline-block">&larr; All staff</a>
+<div class="flex flex-wrap items-center gap-4 mb-1">
+  <h1 class="text-2xl font-bold">{{ staff.full_name }}</h1>
+  <a href="{{ url_for('edit_staff', staff_id=staff.id) }}" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">✏️ Edit details</a>
+</div>
+<p class="text-sm text-slate-500 dark:text-slate-400 mb-4">{{ staff.role or 'No job title' }} &bull; {{ staff.email or 'No email' }}</p>
+
+{% if flags %}
+<div class="bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 p-3 rounded text-sm mb-4">{{ flags }} document(s) expired or due soon.</div>
+{% endif %}
+
+<!-- Add single document -->
+<form method="post" enctype="multipart/form-data" class="bg-white dark:bg-slate-800 p-4 rounded shadow mb-4 flex flex-wrap gap-2 items-end">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+  <div class="min-w-[160px]">
+    <label class="block text-xs text-slate-500 dark:text-slate-400">Document Type*</label>
+    <select name="doc_type" id="doc_type_select" onchange="toggleCustom()" class="w-full px-3 py-2 border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200">
+      {% for p in presets %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+      <option value="Custom">Custom…</option>
+    </select>
+  </div>
+  <div class="min-w-[140px] hidden" id="custom_box">
+    <label class="block text-xs text-slate-500 dark:text-slate-400">Custom Type</label>
+    <input type="text" name="doc_type_custom" id="doc_type_custom" class="w-full px-3 py-2 border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200" />
+  </div>
+  <div class="min-w-[140px]">
+    <label class="block text-xs text-slate-500 dark:text-slate-400">Expiry Date*</label>
+    <input type="date" name="expiry_date" required class="w-full px-3 py-2 border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200" />
+  </div>
+  <div class="min-w-[140px]">
+    <label class="block text-xs text-slate-500 dark:text-slate-400">Upload (PDF/JPG/PNG)</label>
+    <input type="file" name="file" accept=".pdf,.jpg,.jpeg,.png" class="text-sm" />
+  </div>
+  <button class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">+ Add Document</button>
+</form>
+
+<!-- Bulk upload -->
+<details class="bg-white dark:bg-slate-800 p-4 rounded shadow mb-4">
+  <summary class="cursor-pointer text-sm font-semibold text-indigo-600 dark:text-indigo-400">📂 Bulk Upload Documents</summary>
+  <form method="post" action="{{ url_for('bulk_upload', staff_id=staff.id) }}" enctype="multipart/form-data" class="mt-3 flex flex-wrap gap-2 items-end">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <div class="min-w-[140px]">
+      <label class="block text-xs text-slate-500 dark:text-slate-400">Document Type</label>
+      <input type="text" name="doc_type" value="General" class="w-full px-3 py-2 border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200" />
+    </div>
+    <div class="min-w-[140px]">
+      <label class="block text-xs text-slate-500 dark:text-slate-400">Expiry Date*</label>
+      <input type="date" name="expiry_date" required class="w-full px-3 py-2 border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200" />
+    </div>
+    <div class="min-w-[200px]">
+      <label class="block text-xs text-slate-500 dark:text-slate-400">Files (multiple)</label>
+      <input type="file" name="files" accept=".pdf,.jpg,.jpeg,.png" multiple class="text-sm" />
+    </div>
+    <button class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm">Upload All</button>
+  </form>
+</details>
+
+<!-- Self-service upload link -->
+<div class="mb-6 flex gap-2">
+  <form method="post" action="{{ url_for('create_upload_link', staff_id=staff.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <button class="px-3 py-1 bg-slate-200 dark:bg-slate-700 dark:text-slate-200 rounded text-xs hover:bg-slate-300 dark:hover:bg-slate-600">🔗 Generate self-service upload link</button>
+  </form>
+</div>
+
+<script>
+function toggleCustom(){
+  var v = document.getElementById('doc_type_select').value;
+  document.getElementById('custom_box').classList.toggle('hidden', v!=='Custom');
+}
+</script>
+
+<div class="bg-white dark:bg-slate-800 rounded shadow overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead class="bg-slate-100 dark:bg-slate-700 text-left">
+      <tr>
+        <th class="px-4 py-2">Type</th>
+        <th class="px-4 py-2">Expiry</th>
+        <th class="px-4 py-2">Status</th>
+        <th class="px-4 py-2"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in docs %}
+      <tr class="border-t dark:border-slate-700">
+        <td class="px-4 py-2">{{ d.doc_type }}</td>
+        <td class="px-4 py-2">{{ d.expiry_date }}</td>
+        <td class="px-4 py-2">
+          <span class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700 dark:text-white">
+            {% if d.status == 'EXPIRED' %}
+            <span class="w-1.5 h-1.5 rounded-full bg-red-500 opacity-80"></span>
+            {% elif d.status == 'DUE_SOON' %}
+            <span class="w-1.5 h-1.5 rounded-full bg-amber-400 opacity-80"></span>
+            {% else %}
+            <span class="w-1.5 h-1.5 rounded-full bg-green-500 opacity-80"></span>
+            {% endif %}
+            {{ d.status_text }}
+          </span>
+        </td>
+        <td class="px-4 py-2 text-right space-x-2">
+          <a href="{{ url_for('edit_document', doc_id=d.id) }}" class="text-indigo-600 dark:text-indigo-400 hover:underline text-xs">Edit</a>
+          <!-- Renew inline -->
+          <form method="post" action="{{ url_for('renew_document', doc_id=d.id) }}" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <input type="date" name="new_expiry" class="text-xs border rounded px-1 py-0.5 w-28 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200" />
+            <button class="text-green-600 dark:text-green-400 hover:underline text-xs">Renew</button>
+          </form>
+          {% if d.file_path %}
+          <a href="{{ url_for('download_document', doc_id=d.id) }}" class="text-indigo-600 dark:text-indigo-400 hover:underline text-xs">Download</a>
+          {% else %}<span class="text-slate-400 dark:text-slate-400 text-xs">No file</span>{% endif %}
+          <form method="post" action="{{ url_for('delete_document', doc_id=d.id) }}" class="inline" onsubmit="return confirm('Delete this document?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button class="text-slate-800 dark:text-slate-200 hover:underline text-xs">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="px-4 py-4 text-center text-slate-400 dark:text-slate-400">No documents for this staff member.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Privacy Policy | ExpireSafe{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto">
+  <h1 class="text-2xl font-bold mb-6">Privacy Policy</h1>
+
+  <div class="bg-white dark:bg-slate-800 rounded shadow p-6 space-y-6 text-sm text-slate-700 dark:text-slate-300">
+
+    <section>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-2">Data Collected</h2>
+      <p>We store agency-provided staff names, document types, expiry dates, optional uploaded files, and user login details.</p>
+    </section>
+
+    <section>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-2">Purpose</h2>
+      <p>Data is used only to provide reminders, reporting, and audit logging.</p>
+    </section>
+
+    <section>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-2">Ownership</h2>
+      <p>All data belongs to the care agency.</p>
+    </section>
+
+    <section>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-2">Sharing</h2>
+      <p>We do not sell or share data with third parties.</p>
+    </section>
+
+    <section>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-2">Retention</h2>
+      <p>Data is retained until deleted by the agency or per configured retention settings.</p>
+    </section>
+
+    <section>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-2">Rights</h2>
+      <p>Agencies can export or delete all data at any time from the dashboard.</p>
+    </section>
+
+  </div>
+
+  <p class="mt-6 text-center text-xs text-slate-500 dark:text-slate-400">
+    <a href="{{ url_for('terms') }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">Terms of Service</a>
+  </p>
+</div>
+{% endblock %}

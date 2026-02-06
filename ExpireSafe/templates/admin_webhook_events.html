@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Webhook Events | ExpireSafe{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Stripe Webhook Events</h1>
+<p class="text-sm text-slate-500 dark:text-slate-400 mb-4">{{ total }} events total — page {{ page }} of {{ total_pages }}.</p>
+
+<div class="bg-white dark:bg-slate-800 rounded shadow overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead class="bg-slate-100 dark:bg-slate-700 text-left">
+      <tr>
+        <th class="px-4 py-2">Event ID</th>
+        <th class="px-4 py-2">Processed At (UTC)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr class="border-t dark:border-slate-700">
+        <td class="px-4 py-2 font-mono text-xs">{{ r.id }}</td>
+        <td class="px-4 py-2 text-xs text-slate-600 dark:text-slate-300">{{ r.created_at|fmt_time }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="2" class="px-4 py-4 text-center text-slate-400 dark:text-slate-400">No webhook events recorded.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="flex justify-center gap-2 mt-4 text-sm">
+  {% if page > 1 %}
+  <a href="{{ url_for('admin_webhook_events', page=page-1) }}" class="px-3 py-1 bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800">&larr; Prev</a>
+  {% endif %}
+  <span class="px-3 py-1 text-slate-600 dark:text-slate-400">Page {{ page }} / {{ total_pages }}</span>
+  {% if page < total_pages %}
+  <a href="{{ url_for('admin_webhook_events', page=page+1) }}" class="px-3 py-1 bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800">Next &rarr;</a>
+  {% endif %}
+</div>
+{% endblock %}

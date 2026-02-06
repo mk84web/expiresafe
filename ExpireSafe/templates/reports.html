@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Reports | ExpireSafe{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Reports</h1>
+
+<div class="grid sm:grid-cols-3 gap-4 mb-6">
+  <div class="bg-white dark:bg-slate-800 p-4 rounded shadow text-center">
+    <p class="text-3xl font-bold text-indigo-600 dark:text-indigo-400">{{ staff_count }}</p>
+    <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Staff</p>
+  </div>
+  <div class="bg-white dark:bg-slate-800 p-4 rounded shadow text-center">
+    <p class="text-3xl font-bold text-red-600 dark:text-red-400">{{ expired }}</p>
+    <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Expired</p>
+  </div>
+  <div class="bg-white dark:bg-slate-800 p-4 rounded shadow text-center">
+    <p class="text-3xl font-bold text-amber-500 dark:text-amber-400">{{ due_soon }}</p>
+    <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Due Soon</p>
+  </div>
+</div>
+
+<div class="flex gap-4">
+  <a href="{{ url_for('reports_csv') }}" class="px-4 py-2 bg-slate-200 dark:bg-slate-700 dark:text-slate-200 rounded hover:bg-slate-300 dark:hover:bg-slate-600 text-sm">Download CSV</a>
+  <a href="{{ url_for('reports_pdf') }}" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm">Download PDF</a>
+</div>
+{% endblock %}

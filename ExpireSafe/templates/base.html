@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}ExpireSafe{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: 'class' };
+    if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.classList.add('dark');
+    }
+    function toggleDark() {
+      document.documentElement.classList.toggle('dark');
+      localStorage.setItem('theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+    }
+  </script>
+</head>
+<body class="min-h-full bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-200">
+  {% if session.user_id %}
+  <nav class="bg-indigo-700 dark:bg-indigo-900 text-white shadow">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+      <a href="{{ url_for('dashboard') }}" class="font-bold text-lg tracking-tight">ExpireSafe</a>
+      <button id="nav-toggle" class="sm:hidden p-1 rounded hover:bg-indigo-600" onclick="document.getElementById('nav-menu').classList.toggle('hidden')">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <div id="nav-menu" class="hidden sm:flex w-full sm:w-auto flex-col sm:flex-row flex-wrap items-start sm:items-center gap-2 sm:gap-4 text-sm mt-2 sm:mt-0">
+        <a href="{{ url_for('dashboard') }}" class="hover:underline">Dashboard</a>
+        <a href="{{ url_for('staff_list') }}" class="hover:underline">Staff</a>
+        <a href="{{ url_for('reports') }}" class="hover:underline">Reports</a>
+        {% if session.role == 'OWNER' %}
+        <a href="{{ url_for('users') }}" class="hover:underline">Users</a>
+        <a href="{{ url_for('audit_page') }}" class="hover:underline">Audit</a>
+        <a href="{{ url_for('billing') }}" class="hover:underline">Billing</a>
+        <a href="{{ url_for('agency_settings') }}" class="hover:underline">Agency</a>
+        <a href="{{ url_for('notification_prefs') }}" class="hover:underline">Notifications</a>
+        {% endif %}
+        {% if session.get('is_superadmin') %}
+        <a href="{{ url_for('admin_backups') }}" class="hover:underline text-xs">Backups</a>
+        {% endif %}
+        <a href="{{ url_for('totp_setup') }}" class="hover:underline text-xs">2FA</a>
+        <span class="text-indigo-200">{{ session.username }} ({{ session.agency_name }})</span>
+        <a href="{{ url_for('change_password') }}" class="hover:underline text-xs">Password</a>
+        <a href="{{ url_for('logout') }}" class="hover:underline text-xs">Logout</a>
+        <button onclick="toggleDark()" class="hover:underline text-xs" title="Toggle dark mode">🌓</button>
+      </div>
+    </div>
+  </nav>
+  {% else %}
+  <nav class="bg-white dark:bg-slate-800 shadow">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+      <a href="{{ url_for('home') }}" class="font-bold text-lg tracking-tight text-indigo-700 dark:text-indigo-400">ExpireSafe</a>
+      <div class="flex items-center gap-4 text-sm">
+        <a href="{{ url_for('login') }}" class="text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400">Log in</a>
+        <a href="{{ url_for('signup') }}" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Sign up</a>
+        <button onclick="toggleDark()" class="text-xs" title="Toggle dark mode">🌓</button>
+      </div>
+    </div>
+  </nav>
+  {% endif %}
+
+  <main class="max-w-6xl mx-auto px-4 py-8">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+    <div class="mb-4 p-3 rounded {{ 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' if cat=='ok' else 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' }}">
+      {{ msg }}
+    </div>
+    {% endfor %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+
+    {% if content_override %}
+    <div class="text-center py-20">
+      <p class="text-xl text-slate-600 dark:text-slate-300">{{ content_override }}</p>
+      <a href="{{ url_for('home') }}" class="mt-4 inline-block text-indigo-600 dark:text-indigo-400 hover:underline">Go home</a>
+    </div>
+    {% endif %}
+  </main>
+
+  <footer class="text-center text-sm text-slate-400 dark:text-slate-200 py-6 px-4 space-y-2 max-w-2xl mx-auto">
+    <p>ExpireSafe is a reminder and document-tracking tool only.<br>
+    It does not provide legal or compliance advice and does not guarantee inspection outcomes.<br>
+    Compliance responsibility remains with the care agency.</p>
+    <p>
+      <a href="{{ url_for('terms') }}" class="hover:underline text-slate-600 dark:text-slate-100 font-medium">Terms of Service</a>
+      &nbsp;·&nbsp;
+      <a href="{{ url_for('privacy') }}" class="hover:underline text-slate-600 dark:text-slate-100 font-medium">Privacy Policy</a>
+    </p>
+  </footer>
+</body>
+</html>

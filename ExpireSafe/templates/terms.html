@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Terms of Service | ExpireSafe{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto">
+  <h1 class="text-2xl font-bold mb-6">Terms of Service</h1>
+
+  <div class="bg-white dark:bg-slate-800 rounded shadow p-6 space-y-6 text-sm text-slate-700 dark:text-slate-300">
+
+    <section>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-2">Service Nature</h2>
+      <p>ExpireSafe is a reminder and document-tracking tool only. It does not provide legal, regulatory, or compliance advice.</p>
+    </section>
+
+    <section>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-2">Responsibility</h2>
+      <p>The care agency remains fully responsible for the accuracy, completeness, and validity of all data entered, uploaded, or relied upon.</p>
+    </section>
+
+    <section>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-2">No Guarantee</h2>
+      <p>Use of ExpireSafe does not guarantee regulatory approval, inspection outcomes, or compliance with any authority.</p>
+    </section>
+
+    <section>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-2">Availability</h2>
+      <p>We aim for high availability but do not guarantee uninterrupted service.</p>
+    </section>
+
+    <section>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-2">Limitation of Liability</h2>
+      <p>To the maximum extent permitted by law, ExpireSafe is not liable for fines, penalties, inspections, or business losses.</p>
+    </section>
+
+    <section>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-2">Termination</h2>
+      <p>Agencies may export or delete their data at any time. Upon termination, access to the service ends.</p>
+    </section>
+
+    <section>
+      <h2 class="font-semibold text-slate-900 dark:text-slate-100 mb-2">Governing Law</h2>
+      <p>Governed by the laws applicable in the agency's operating jurisdiction.</p>
+    </section>
+
+  </div>
+
+  <p class="mt-6 text-center text-xs text-slate-500 dark:text-slate-400">
+    <a href="{{ url_for('privacy') }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">Privacy Policy</a>
+  </p>
+</div>
+{% endblock %}

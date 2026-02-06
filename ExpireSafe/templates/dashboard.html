@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Dashboard | ExpireSafe{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">Dashboard</h1>
+
+<!-- ── 1️⃣ Priority card strip: Attention → Expired → Due Soon → Staff ── -->
+<div class="grid sm:grid-cols-4 gap-4 mb-8">
+  <!-- Attention Needed — primary card, taller, outlined -->
+  <div class="bg-white dark:bg-slate-800 rounded-lg shadow p-5 text-center {{ 'ring-2 ring-red-400/60 dark:ring-red-500/40' if total_flags > 0 else 'ring-2 ring-green-400/60 dark:ring-green-500/40' }}">
+    <div class="flex items-center justify-center gap-2 mb-1">
+      {% if total_flags > 0 %}
+      <svg class="w-5 h-5 text-red-500 dark:text-red-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+      {% else %}
+      <svg class="w-5 h-5 text-green-500 dark:text-green-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+      {% endif %}
+      <p class="text-lg font-semibold dark:text-slate-100">{{ compliance_status }}</p>
+    </div>
+    <p class="text-sm text-slate-500 dark:text-slate-400">
+      {% if total_flags > 0 %}{{ total_flags }} item{{ 's' if total_flags != 1 }} expired or due soon{% else %}All documents current{% endif %}
+    </p>
+  </div>
+
+  <!-- Expired — clickable filter -->
+  <button onclick="filterTable('EXPIRED')" class="bg-white dark:bg-slate-800 p-4 rounded-lg shadow text-center hover:ring-2 hover:ring-red-400/40 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-red-400/60">
+    <p class="text-3xl font-bold text-red-600 dark:text-red-400">{{ expired }}</p>
+    <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide mt-1">Expired</p>
+  </button>
+
+  <!-- Due Soon — clickable filter -->
+  <button onclick="filterTable('DUE_SOON')" class="bg-white dark:bg-slate-800 p-4 rounded-lg shadow text-center hover:ring-2 hover:ring-amber-400/40 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-amber-400/60">
+    <p class="text-3xl font-bold text-amber-500 dark:text-amber-400">{{ due_soon }}</p>
+    <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide mt-1">Due Soon</p>
+  </button>
+
+  <!-- Staff count — least urgent -->
+  <div class="bg-white dark:bg-slate-800 p-4 rounded-lg shadow text-center">
+    <p class="text-3xl font-bold text-indigo-600 dark:text-indigo-400">{{ staff_count }}</p>
+    <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide mt-1">Staff Members</p>
+  </div>
+</div>
+
+<!-- Active filter indicator -->
+<div id="filterBar" class="hidden mb-3 flex items-center gap-2">
+  <span class="text-sm text-slate-500 dark:text-slate-400">Showing:</span>
+  <span id="filterLabel" class="text-sm font-medium dark:text-slate-200"></span>
+  <button onclick="filterTable('ALL')" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline ml-1">Clear filter</button>
+</div>
+
+<!-- ── 2️⃣–4️⃣ Table with urgency borders, reduced repetition, quieter badges ── -->
+<div class="bg-white dark:bg-slate-800 rounded-lg shadow overflow-x-auto">
+  <table id="docTable" class="w-full text-sm">
+    <thead class="bg-slate-100 dark:bg-slate-700 text-left">
+      <tr>
+        <th class="px-4 py-3 font-medium text-slate-600 dark:text-slate-300">Staff</th>
+        <th class="px-4 py-3 font-medium text-slate-600 dark:text-slate-300">Item</th>
+        <th class="px-4 py-3 font-medium text-slate-600 dark:text-slate-300">Expiry</th>
+        <th class="px-4 py-3 font-medium text-slate-600 dark:text-slate-300">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set ns = namespace(prev_name='') %}
+      {% for r in table_rows %}
+      <tr class="border-t dark:border-slate-700/60 doc-row transition-opacity duration-200
+        {{ 'border-l-[3px] border-l-red-400/70 dark:border-l-red-500/50' if r.status=='EXPIRED' else '' }}
+        {{ 'border-l-[3px] border-l-amber-400/70 dark:border-l-amber-500/50' if r.status=='DUE_SOON' else '' }}
+        {{ 'border-l-[3px] border-l-transparent' if r.status=='CURRENT' else '' }}"
+        data-status="{{ r.status }}">
+        <!-- 3️⃣ Reduce repetition: dim repeated names, bold the item -->
+        <td class="px-4 py-2.5">
+          {% if r.full_name == ns.prev_name %}
+          <a href="{{ url_for('staff_profile', staff_id=r.staff_id) }}" class="text-indigo-600/50 dark:text-indigo-400/50 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors">{{ r.full_name }}</a>
+          {% else %}
+          <a href="{{ url_for('staff_profile', staff_id=r.staff_id) }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ r.full_name }}</a>
+          {% endif %}
+        </td>
+        <td class="px-4 py-2.5 font-medium dark:text-slate-200">{{ r.doc_type }}</td>
+        <td class="px-4 py-2.5 text-slate-600 dark:text-slate-400">{{ r.expiry_date }}</td>
+        <!-- 4️⃣ Status with colour dots + white text -->
+        <td class="px-4 py-2.5">
+          <span class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700 dark:text-white">
+            {% if r.status == 'EXPIRED' %}
+            <span class="w-1.5 h-1.5 rounded-full bg-red-500 opacity-80"></span>
+            {% elif r.status == 'DUE_SOON' %}
+            <span class="w-1.5 h-1.5 rounded-full bg-amber-400 opacity-80"></span>
+            {% else %}
+            <span class="w-1.5 h-1.5 rounded-full bg-green-500 opacity-80"></span>
+            {% endif %}
+            {{ r.status_text }}
+          </span>
+        </td>
+      </tr>
+      {% set ns.prev_name = r.full_name %}
+      {% else %}
+      <tr><td colspan="4" class="px-4 py-6 text-center text-slate-400 dark:text-slate-400">No documents yet. <a href="{{ url_for('staff_list') }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">Add staff</a> to begin.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- 5️⃣ Micro affordance: click Expired/Due Soon cards to filter table -->
+<script>
+function filterTable(status) {
+  const rows = document.querySelectorAll('.doc-row');
+  const bar = document.getElementById('filterBar');
+  const label = document.getElementById('filterLabel');
+
+  if (status === 'ALL') {
+    rows.forEach(r => { r.classList.remove('hidden'); r.style.opacity = ''; });
+    bar.classList.add('hidden');
+    return;
+  }
+
+  const names = { EXPIRED: 'Expired', DUE_SOON: 'Due soon' };
+  label.textContent = names[status] || status;
+  bar.classList.remove('hidden');
+
+  rows.forEach(r => {
+    if (r.dataset.status === status) {
+      r.classList.remove('hidden');
+      r.style.opacity = '';
+    } else {
+      r.classList.add('hidden');
+    }
+  });
+}
+</script>
+{% endblock %}

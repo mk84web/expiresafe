@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Billing | ExpireSafe{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto">
+
+  {% if agency.billing_status != 'ACTIVE' %}
+  <div class="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-8 text-center mb-8">
+    <h1 class="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4">Your agency is set up.</h1>
+    <p class="text-slate-600 dark:text-slate-400 mb-6">
+      You've added staff and documents successfully.<br>
+      To activate email reminders, reports, and ongoing tracking, choose a plan below.
+    </p>
+    <ul class="text-sm text-slate-600 dark:text-slate-400 mb-6 space-y-1">
+      <li>✓ This ensures reminders are sent on time</li>
+      <li>✓ Reports stay accurate</li>
+      <li>✓ Your data remains protected</li>
+    </ul>
+  </div>
+  {% else %}
+  <div class="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-6 mb-8">
+    <h1 class="text-2xl font-semibold">Billing</h1>
+    <div class="text-sm text-slate-600 dark:text-slate-400 mt-1">
+      Status: <span class="font-semibold text-green-600 dark:text-green-400">{{ agency.billing_status }}</span> •
+      Plan: <span class="font-semibold">{{ agency.plan }}</span>
+      {% if agency.current_period_end %}
+      • Renews: {{ agency.current_period_end[:10] }}
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="grid md:grid-cols-3 gap-4">
+    {% for p in ["STARTER","STANDARD","PRO"] %}
+    <div class="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-5 {{ 'ring-2 ring-indigo-500' if agency.plan == p and agency.billing_status == 'ACTIVE' else '' }}">
+      <div class="font-semibold text-lg">{{ p }}</div>
+      <div class="text-sm text-slate-600 dark:text-slate-400 mt-1 mb-4">
+        Up to {{ limits[p]["staff"] }} staff
+      </div>
+
+      <form method="post" action="{{ url_for('create_checkout_session') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="plan" value="{{ p }}">
+        {% if agency.plan == p and agency.billing_status == 'ACTIVE' %}
+        <button disabled class="w-full bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400 rounded px-4 py-2 text-sm cursor-not-allowed">
+          Current Plan
+        </button>
+        {% else %}
+        <button class="w-full bg-indigo-600 text-white rounded px-4 py-2 text-sm hover:bg-indigo-700">
+          {% if agency.billing_status != 'ACTIVE' %}
+          Activate reminders &amp; reports
+          {% else %}
+          Switch to {{ p }}
+          {% endif %}
+        </button>
+        {% endif %}
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+
+  <p class="text-center text-sm text-slate-500 dark:text-slate-400 mt-6">
+    Cancel anytime. No long-term contracts.
+  </p>
+
+</div>
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Accept Invite | ExpireSafe{% endblock %}
+{% block content %}
+<div class="max-w-md mx-auto bg-white dark:bg-slate-800 border dark:border-slate-700 rounded p-6">
+  <h1 class="text-xl font-semibold mb-2">Accept invite</h1>
+  <div class="text-sm text-slate-600 dark:text-slate-400 mb-4">
+    You're accepting an invite for: <span class="font-semibold">{{ email }}</span>
+  </div>
+
+  <form method="post" class="space-y-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div>
+      <label class="text-sm">Choose a username</label>
+      <input name="username" class="w-full border rounded px-3 py-2 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200" required />
+    </div>
+    <div>
+      <label class="text-sm">Set a password</label>
+      <input type="password" name="password" class="w-full border rounded px-3 py-2 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200" required minlength="8" />
+      <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">Minimum 8 characters.</div>
+    </div>
+    <button class="w-full bg-indigo-600 dark:bg-indigo-700 text-white rounded px-3 py-2 hover:bg-indigo-700 dark:hover:bg-indigo-600">Create account</button>
+  </form>
+</div>
+{% endblock %}
