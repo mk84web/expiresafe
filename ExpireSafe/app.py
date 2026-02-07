@@ -525,23 +525,9 @@ def plan_staff_limit(plan: str) -> int:
 def require_active_agency(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if BILLING_DISABLED:
-            return fn(*args, **kwargs)
-
-        agency_id = session_agency_id()
-        agency = get_agency(agency_id)
-
-        # allow owners to reach billing-related endpoints even if inactive
-        if request.endpoint in ("billing", "create_checkout_session", "stripe_webhook"):
-            return fn(*args, **kwargs)
-
-        if not agency_is_active(agency):
-            flash("Your subscription is inactive. Please update your billing.", "error")
-            return redirect(url_for("billing"))
-
+        # BILLING DISABLED — skip subscription check so all pages are accessible
         return fn(*args, **kwargs)
     return wrapper
-
 
 
 def enforce_staff_limit(agency_id: int):
@@ -2291,7 +2277,11 @@ def totp_setup():
             flash("Two-factor authentication disabled.", "ok")
             return redirect(url_for("totp_setup"))
 
-    is_enabled = int(user["totp_enabled"] or 0) == 1
+    if not user:
+        flash("Please sign in again.", "error")
+        return redirect(url_for("login"))
+
+    is_enabled = int((user.get("totp_enabled") or 0)) == 1
     new_secret = _totp_generate_secret() if not is_enabled else None
     return render_template("totp_setup.html", is_enabled=is_enabled, secret=new_secret,
                            email=session.get("email", "user"))
