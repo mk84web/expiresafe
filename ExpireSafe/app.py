@@ -525,17 +525,23 @@ def plan_staff_limit(plan: str) -> int:
 def require_active_agency(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
+        if BILLING_DISABLED:
+            return fn(*args, **kwargs)
+
         agency_id = session_agency_id()
         agency = get_agency(agency_id)
-        # allow owners to reach billing page even if inactive
+
+        # allow owners to reach billing-related endpoints even if inactive
         if request.endpoint in ("billing", "create_checkout_session", "stripe_webhook"):
             return fn(*args, **kwargs)
 
         if not agency_is_active(agency):
             flash("Your subscription is inactive. Please update your billing.", "error")
             return redirect(url_for("billing"))
+
         return fn(*args, **kwargs)
     return wrapper
+
 
 
 def enforce_staff_limit(agency_id: int):
