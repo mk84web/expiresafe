@@ -620,7 +620,7 @@ def audit(action: str, entity_type: str, entity_id=None, metadata=None):
 def add_security_headers(resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
-    resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     resp.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     if os.environ.get("FLASK_ENV") == "production":
         resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
