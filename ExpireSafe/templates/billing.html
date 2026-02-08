@@ -29,6 +29,13 @@
   </div>
   {% endif %}
 
+  {% if session.get("user_id") and session.get("role") == "OWNER" and agency and agency["billing_status"] != "ACTIVE" %}
+  <div class="alert alert-warning">
+    Your subscription is inactive. Please update billing to restore access.
+    <a href="{{ url_for('billing') }}">Go to Billing</a>
+  </div>
+  {% endif %}
+
   <div class="grid md:grid-cols-3 gap-4">
     {% for p in ["STARTER","STANDARD","PRO"] %}
     <div class="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-5 {{ 'ring-2 ring-indigo-500' if agency.plan == p and agency.billing_status == 'ACTIVE' else '' }}">
