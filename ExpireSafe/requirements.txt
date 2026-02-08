@@ -7,5 +7,5 @@ python-dotenv==1.0.1
 itsdangerous==2.2.0
 stripe==10.12.0
 gunicorn==22.0.0
-psycopg-binary>=3.2.2
+psycopg[binary]>=3.3.2
 

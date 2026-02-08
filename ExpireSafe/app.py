@@ -1,6 +1,13 @@
 import os
 import sqlite3
 import smtplib
+
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except Exception:
+    psycopg = None
+    dict_row = None
 import sys
 import json
 import io
@@ -173,12 +180,35 @@ def unix_to_naive_utc(ts: int) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None).isoformat()
 
 
+DATABASE_URL = os.getenv("DATABASE_URL")  # Render Postgres sets this
+
+
 def get_db():
+    # Use Postgres on Render (DATABASE_URL will exist)
+    if DATABASE_URL:
+        if psycopg is None:
+            raise RuntimeError("psycopg is not installed but DATABASE_URL is set.")
+        conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+        return conn
+
+    # Fallback: local SQLite
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=30000;")
     conn.execute("PRAGMA synchronous=NORMAL;")
     return conn
+
+
+def row_to_dict(row):
+    """Works for sqlite3.Row + already-dict + None."""
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return row
+    try:
+        return dict(row)  # sqlite3.Row -> dict
+    except TypeError:
+        return None
 
 
 def init_db():
@@ -2255,6 +2285,12 @@ def totp_setup():
     with get_db() as db:
         user = db.execute("SELECT totp_secret, totp_enabled FROM users WHERE id=?", (uid,)).fetchone()
 
+    user = row_to_dict(user)
+
+    if not user:
+        flash("Session expired. Please log in again.", "error")
+        return redirect(url_for("login"))
+
     if request.method == "POST":
         action = request.form.get("action", "")
         if action == "enable":
@@ -2276,10 +2312,6 @@ def totp_setup():
             audit("TOTP_DISABLE", "user", uid, {})
             flash("Two-factor authentication disabled.", "ok")
             return redirect(url_for("totp_setup"))
-
-    if not user:
-        flash("Please sign in again.", "error")
-        return redirect(url_for("login"))
 
     is_enabled = int((user.get("totp_enabled") or 0)) == 1
     new_secret = _totp_generate_secret() if not is_enabled else None
