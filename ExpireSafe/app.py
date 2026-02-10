@@ -1940,6 +1940,9 @@ def billing():
 @login_required
 @owner_required
 def create_checkout_session():
+    import os
+    import stripe
+
     # --- Get agency for current user (safe) ---
     user_id = session.get("user_id")
     if not user_id:
@@ -1948,18 +1951,39 @@ def create_checkout_session():
 
     db = get_db()
 
-    agency = db.execute("""
-        SELECT a.*
+    # Pull BOTH agency + user email in one query
+    row = db.execute("""
+        SELECT a.*, u.email AS user_email
         FROM agencies a
         JOIN users u ON u.agency_id = a.id
         WHERE u.id = ?
     """, (user_id,)).fetchone()
 
-    if agency is None:
+    if row is None:
         flash("No agency found for this account. Please complete agency setup.", "error")
         return redirect(url_for("agency"))
 
-    customer_id = agency.get("stripe_customer_id") if hasattr(agency, "get") else agency["stripe_customer_id"]
+    agency = row  # row includes agency columns + user_email
+
+    # Stripe customer id (will be None/empty if not created yet)
+    customer_id = agency["stripe_customer_id"]
+
+    # Create Stripe customer on demand (ESSENTIAL)
+    if not customer_id:
+        stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+
+        cust = stripe.Customer.create(
+            name=agency["name"] if "name" in agency.keys() and agency["name"] else "ExpireSafe Agency",
+            email=agency["user_email"],
+            metadata={"agency_id": str(agency["id"])}
+        )
+        customer_id = cust["id"]
+
+        db.execute(
+            "UPDATE agencies SET stripe_customer_id = ? WHERE id = ?",
+            (customer_id, agency["id"])
+        )
+        db.commit()
 
     plan = request.form.get("plan", DEFAULT_PLAN).upper()
     price_map = {
@@ -1977,24 +2001,6 @@ def create_checkout_session():
         flash("APP_BASE_URL not set.", "error")
         return redirect(url_for("billing"))
 
-    # create/reuse stripe customer
-    if not customer_id:
-        import stripe
-        stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-
-        cust = stripe.Customer.create(
-            name=agency.get("name", "ExpireSafe Agency"),
-            email=session.get("email"),
-            metadata={"agency_id": str(agency["id"])}
-        )
-        customer_id = cust["id"]
-
-        db.execute(
-            "UPDATE agencies SET stripe_customer_id = ? WHERE id = ?",
-            (customer_id, agency["id"])
-        )
-        db.commit()
-
     session_obj = stripe.checkout.Session.create(
         mode="subscription",
         customer=customer_id,
@@ -2002,7 +2008,7 @@ def create_checkout_session():
         success_url=f"{base_url}/billing/success",
         cancel_url=f"{base_url}/billing",
         allow_promotion_codes=True,
-        metadata={"agency_id": str(agency_id), "plan": plan},
+        metadata={"agency_id": str(agency["id"]), "plan": plan},
     )
     return redirect(session_obj.url, code=303)
 
