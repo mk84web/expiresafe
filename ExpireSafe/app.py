@@ -2001,7 +2001,9 @@ def create_checkout_session():
 
     # If user has no linked agency, try session agency_id
     if row["user_agency_id"] is None:
-        agency_id = session.get("agency_id")
+        agency_id = row["user_agency_id"] or session.get("agency_id")
+        if agency_id:
+            agency_id = int(agency_id)
         if not agency_id:
             flash("No agency found for this account. Please complete agency setup.", "error")
             return redirect(url_for("agency_settings"))
