@@ -37,7 +37,7 @@
   {% endif %}
 
   <div class="grid md:grid-cols-3 gap-4">
-    {% for p in ["STARTER","STANDARD","PRO"] %}
+    {% for p in ["ESSENTIAL","ENFORCED","GOVERNED"] %}
     <div class="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-5 {{ 'ring-2 ring-indigo-500' if agency.plan == p and agency.billing_status == 'ACTIVE' else '' }}">
       <div class="font-semibold text-lg">{{ p }}</div>
       <div class="text-sm text-slate-600 dark:text-slate-400 mt-1 mb-4">

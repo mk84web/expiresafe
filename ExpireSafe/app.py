@@ -66,12 +66,12 @@ email_executor = ThreadPoolExecutor(max_workers=2)  # keep small
 PASSWORD_RE = re.compile(r"^(?=.*[A-Z])(?=.*\d).{8,}$")
 
 PLAN_LIMITS = {
-    "STARTER": {"staff": 25},
-    "STANDARD": {"staff": 100},
-    "PRO": {"staff": 10_000},  # effectively unlimited for MVP
+    "ESSENTIAL": {"staff": 25},
+    "ENFORCED": {"staff": 100},
+    "GOVERNED": {"staff": 10_000},  # effectively unlimited for MVP
 }
 
-DEFAULT_PLAN = "STARTER"
+DEFAULT_PLAN = "ESSENTIAL"
 
 DOC_PRESETS = {
     "UK": [
@@ -332,7 +332,7 @@ def ensure_schema_additions():
         # agencies billing fields
         acols = [r["name"] for r in db.execute("PRAGMA table_info(agencies)").fetchall()]
         if "plan" not in acols:
-            db.execute("ALTER TABLE agencies ADD COLUMN plan TEXT NOT NULL DEFAULT 'STARTER';")
+            db.execute("ALTER TABLE agencies ADD COLUMN plan TEXT NOT NULL DEFAULT 'ESSENTIAL';")
         if "billing_status" not in acols:
             db.execute("ALTER TABLE agencies ADD COLUMN billing_status TEXT NOT NULL DEFAULT 'INACTIVE';")
         if "stripe_customer_id" not in acols:
@@ -418,7 +418,7 @@ def ensure_default_agency_and_owner():
             db.execute(
                 """INSERT INTO agencies (name, country, plan, billing_status, current_period_end, created_at)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                ("Demo Care Agency", "UK", "STANDARD", "ACTIVE",
+                ("Demo Care Agency", "UK", "ENFORCED", "ACTIVE",
                  (utcnow() + timedelta(days=30)).isoformat(),
                  utcnow().isoformat()),
             )
@@ -1945,9 +1945,9 @@ def create_checkout_session():
 
     plan = request.form.get("plan", DEFAULT_PLAN).upper()
     price_map = {
-        "STARTER": os.environ.get("STRIPE_PRICE_STARTER"),
-        "STANDARD": os.environ.get("STRIPE_PRICE_STANDARD"),
-        "PRO": os.environ.get("STRIPE_PRICE_PRO"),
+        "ESSENTIAL": os.environ.get("STRIPE_PRICE_ESSENTIAL"),
+        "ENFORCED": os.environ.get("STRIPE_PRICE_ENFORCED"),
+        "GOVERNED": os.environ.get("STRIPE_PRICE_GOVERNED"),
     }
     price_id = price_map.get(plan)
     if not price_id:
