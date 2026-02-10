@@ -2015,10 +2015,33 @@ def create_checkout_session():
         """, (user_id, agency_id)).fetchone()
 
         if row2 is None:
-            flash("No agency found for this account. Please complete agency setup.", "error")
-            return redirect(url_for("agency_settings"))
+            # Auto-create agency if missing (owner only)
+            if session.get("role") == "OWNER":
+                cur = db.execute("""
+                    INSERT INTO agencies (name, country, created_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                """, (
+                    session.get("agency_name", "ExpireSafe Agency"),
+                    session.get("agency_country", "UK"),
+                ))
+                agency_id = cur.lastrowid
 
-        agency = row2
+                db.execute(
+                    "UPDATE users SET agency_id = ? WHERE id = ?",
+                    (agency_id, user_id)
+                )
+                db.commit()
+
+                agency = db.execute("""
+                    SELECT a.*, (SELECT email FROM users WHERE id = ?) AS user_email
+                    FROM agencies a
+                    WHERE a.id = ?
+                """, (user_id, agency_id)).fetchone()
+            else:
+                flash("No agency found for this account.", "error")
+                return redirect(url_for("billing"))
+        else:
+            agency = row2
     else:
         agency = row
 
