@@ -1997,7 +1997,7 @@ def create_checkout_session():
 
     if row is None:
         flash("No agency found for this account. Please complete agency setup.", "error")
-        return redirect(url_for("agency"))
+        return redirect(url_for("billing"))
 
     agency = row  # row includes agency columns + user_email
 
