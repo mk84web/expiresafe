@@ -145,8 +145,6 @@ def create_app():
 
     app.config["UPLOAD_FOLDER"] = UPLOAD_DIR
 
-    stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
-
     init_db()
     ensure_schema_additions()
     ensure_default_agency_and_owner()
@@ -1978,6 +1976,8 @@ def create_checkout_session():
     stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
     if not stripe.api_key:
         raise RuntimeError("STRIPE_SECRET_KEY missing in environment")
+
+    app.logger.info("Stripe key prefix: %s", (stripe.api_key or "")[:3])
 
     # --- Get agency for current user (safe) ---
     user_id = session.get("user_id")
