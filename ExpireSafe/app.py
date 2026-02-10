@@ -1040,7 +1040,7 @@ def login():
             user = db.execute("""
                 SELECT u.*, a.name as agency_name, a.country as agency_country
                 FROM users u
-                JOIN agencies a ON a.id = u.agency_id
+                LEFT JOIN agencies a ON a.id = u.agency_id
                 WHERE u.username = ? OR u.email = ?
                 ORDER BY u.id ASC
                 LIMIT 1
@@ -1054,16 +1054,50 @@ def login():
             flash("Your account has been deactivated. Contact your agency owner.", "error")
             return render_template("login.html")
 
+        # --- Ensure owner has an agency (auto-create if missing) ---
+        user_id = user["id"]
+        agency_name = user["agency_name"]
+        agency_country = user["agency_country"]
+        agency_id = user["agency_id"]
+
+        if not agency_name and user["role"] == "OWNER":
+            with get_db() as db:
+                # Check if an agency already exists for this user
+                existing = db.execute(
+                    "SELECT * FROM agencies WHERE id = ?", (agency_id,)
+                ).fetchone() if agency_id else None
+
+                if not existing:
+                    db.execute("""
+                        INSERT INTO agencies (name, country, created_at, plan, billing_status)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, ("My Agency", "UK", utcnow().isoformat(), DEFAULT_PLAN, "INACTIVE"))
+                    db.commit()
+
+                    new_agency_id = db.execute(
+                        "SELECT last_insert_rowid()"
+                    ).fetchone()[0]
+
+                    db.execute(
+                        "UPDATE users SET agency_id = ? WHERE id = ?",
+                        (new_agency_id, user_id)
+                    )
+                    db.commit()
+
+                    agency_id = new_agency_id
+                    agency_name = "My Agency"
+                    agency_country = "UK"
+
         # Rotate session: clear any stale keys from a previous user
         session.clear()
         session.permanent = True
         session.update({
-            "user_id": user["id"],
+            "user_id": user_id,
             "username": user["username"],
             "email": user["email"],
-            "agency_id": user["agency_id"],
-            "agency_name": user["agency_name"],
-            "agency_country": user["agency_country"],
+            "agency_id": agency_id,
+            "agency_name": agency_name,
+            "agency_country": agency_country,
             "role": user["role"],
         })
 
@@ -1940,8 +1974,10 @@ def billing():
 @login_required
 @owner_required
 def create_checkout_session():
-    import os
-    import stripe
+    import os, stripe
+    stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
+    if not stripe.api_key:
+        raise RuntimeError("STRIPE_SECRET_KEY missing in environment")
 
     # --- Get agency for current user (safe) ---
     user_id = session.get("user_id")
@@ -1970,8 +2006,6 @@ def create_checkout_session():
 
     # Create Stripe customer on demand (ESSENTIAL)
     if not customer_id:
-        stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-
         cust = stripe.Customer.create(
             name=agency["name"] if "name" in agency.keys() and agency["name"] else "ExpireSafe Agency",
             email=agency["user_email"],
