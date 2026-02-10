@@ -1989,17 +1989,36 @@ def create_checkout_session():
 
     # Pull BOTH agency + user email in one query
     row = db.execute("""
-        SELECT a.*, u.email AS user_email
-        FROM agencies a
-        JOIN users u ON u.agency_id = a.id
+        SELECT a.*, u.email AS user_email, u.agency_id AS user_agency_id
+        FROM users u
+        LEFT JOIN agencies a ON a.id = u.agency_id
         WHERE u.id = ?
     """, (user_id,)).fetchone()
 
     if row is None:
-        flash("No agency found for this account. Please complete agency setup.", "error")
-        return redirect(url_for("billing"))
+        flash("Please log in again.", "error")
+        return redirect(url_for("login"))
 
-    agency = row  # row includes agency columns + user_email
+    # If user has no linked agency, try session agency_id
+    if row["user_agency_id"] is None:
+        agency_id = session.get("agency_id")
+        if not agency_id:
+            flash("No agency found for this account. Please complete agency setup.", "error")
+            return redirect(url_for("agency_settings"))
+
+        row2 = db.execute("""
+            SELECT a.*, (SELECT email FROM users WHERE id = ?) AS user_email
+            FROM agencies a
+            WHERE a.id = ?
+        """, (user_id, agency_id)).fetchone()
+
+        if row2 is None:
+            flash("No agency found for this account. Please complete agency setup.", "error")
+            return redirect(url_for("agency_settings"))
+
+        agency = row2
+    else:
+        agency = row
 
     # Stripe customer id (will be None/empty if not created yet)
     customer_id = agency["stripe_customer_id"]
