@@ -1940,8 +1940,26 @@ def billing():
 @login_required
 @owner_required
 def create_checkout_session():
-    agency_id = session_agency_id()
-    agency = get_agency(agency_id)
+    # --- Get agency for current user (safe) ---
+    user_id = session.get("user_id")
+    if not user_id:
+        flash("Please log in again.", "error")
+        return redirect(url_for("login"))
+
+    db = get_db()
+
+    agency = db.execute("""
+        SELECT a.*
+        FROM agencies a
+        JOIN users u ON u.agency_id = a.id
+        WHERE u.id = ?
+    """, (user_id,)).fetchone()
+
+    if agency is None:
+        flash("No agency found for this account. Please complete agency setup.", "error")
+        return redirect(url_for("agency"))
+
+    customer_id = agency.get("stripe_customer_id") if hasattr(agency, "get") else agency["stripe_customer_id"]
 
     plan = request.form.get("plan", DEFAULT_PLAN).upper()
     price_map = {
@@ -1960,16 +1978,22 @@ def create_checkout_session():
         return redirect(url_for("billing"))
 
     # create/reuse stripe customer
-    customer_id = agency["stripe_customer_id"]
     if not customer_id:
+        import stripe
+        stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+
         cust = stripe.Customer.create(
-            name=agency["name"],
-            metadata={"agency_id": str(agency_id)}
+            name=agency.get("name", "ExpireSafe Agency"),
+            email=session.get("email"),
+            metadata={"agency_id": str(agency["id"])}
         )
         customer_id = cust["id"]
-        with get_db() as db:
-            db.execute("UPDATE agencies SET stripe_customer_id=? WHERE id=?", (customer_id, agency_id))
-            db.commit()
+
+        db.execute(
+            "UPDATE agencies SET stripe_customer_id = ? WHERE id = ?",
+            (customer_id, agency["id"])
+        )
+        db.commit()
 
     session_obj = stripe.checkout.Session.create(
         mode="subscription",
