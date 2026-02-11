@@ -2118,6 +2118,12 @@ def billing():
         except Exception:
             pass
 
+    app.logger.info("BILLING DEBUG agency_id=%s status=%s plan=%s sub=%s",
+                    agency_id,
+                    agency.get("billing_status"),
+                    agency.get("plan"),
+                    agency.get("stripe_subscription_id"))
+
     prices = {
         "ESSENTIAL": os.environ.get("PRICE_ESSENTIAL", "£49/mo"),
         "ENFORCED": os.environ.get("PRICE_ENFORCED", "£99/mo"),
