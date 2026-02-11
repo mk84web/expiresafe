@@ -552,6 +552,24 @@ def agency_is_active(agency) -> bool:
     return agency and agency["billing_status"] == "ACTIVE"
 
 
+def billing_mode(agency) -> str:
+    """
+    Returns one of: ACTIVE, PAST_DUE, GRACE_PERIOD, INACTIVE
+    """
+    if not agency:
+        return "INACTIVE"
+    return (agency.get("billing_status") or "INACTIVE").upper()
+
+
+def can_write(agency) -> bool:
+    """
+    Writes allowed in ACTIVE + PAST_DUE only.
+    GRACE_PERIOD = read-only, INACTIVE = no access.
+    """
+    mode = billing_mode(agency)
+    return mode in ("ACTIVE", "PAST_DUE")
+
+
 def plan_staff_limit(plan: str) -> int:
     plan = (plan or DEFAULT_PLAN).upper()
     return PLAN_LIMITS.get(plan, PLAN_LIMITS[DEFAULT_PLAN])["staff"]
@@ -589,34 +607,23 @@ def require_active_agency(fn):
 
 
 def require_write_access(fn):
-    """Block all write operations when billing is GRACE_PERIOD (expired grace) or INACTIVE.
-    Use on POST-only mutation routes for explicit write gating.
-    PAST_DUE still allows writes (temporary leniency while payment retries).
+    """Block all write operations when billing is GRACE_PERIOD or INACTIVE.
+    Billing routes should NOT use this decorator.
     """
     @wraps(fn)
     def wrapper(*args, **kwargs):
         agency_id = session.get("agency_id")
         if not agency_id:
-            return fn(*args, **kwargs)
+            abort(403)
+
         agency = get_agency(int(agency_id))
-        if not agency:
-            return fn(*args, **kwargs)
-        status = agency["billing_status"]
-        if status == "ACTIVE":
-            return fn(*args, **kwargs)
-        if status == "PAST_DUE":
-            # Allow writes but warn — payment is still being retried
-            return fn(*args, **kwargs)
-        if status == "GRACE_PERIOD":
-            grace_end = agency.get("grace_period_end") or ""
-            if grace_end and datetime.fromisoformat(grace_end) > utcnow():
-                flash("Your subscription has lapsed. Read-only access during grace period.", "error")
-            else:
-                flash("Your grace period has expired. Please resubscribe to make changes.", "error")
+        mode = billing_mode(agency)
+
+        if mode in ("INACTIVE", "GRACE_PERIOD"):
+            flash("Your plan is in read-only mode. Update billing to continue.", "error")
             return redirect(url_for("billing"))
-        # INACTIVE or unknown
-        flash("Your subscription is inactive. Please activate a plan to make changes.", "error")
-        return redirect(url_for("billing"))
+
+        return fn(*args, **kwargs)
     return wrapper
 
 
@@ -1329,6 +1336,7 @@ def dashboard():
 @app.route("/users", methods=["GET", "POST"])
 @login_required
 @owner_required
+@require_write_access
 def users():
     agency_id = session_agency_id()
 
@@ -1386,6 +1394,7 @@ def users():
 @app.route("/staff", methods=["GET", "POST"])
 @login_required
 @require_active_agency
+@require_write_access
 def staff_list():
     agency_id = session_agency_id()
 
@@ -1434,6 +1443,7 @@ def staff_list():
 @app.route("/staff/<int:staff_id>/edit", methods=["GET", "POST"])
 @login_required
 @require_active_agency
+@require_write_access
 def edit_staff(staff_id: int):
     agency_id = session_agency_id()
     with get_db() as db:
@@ -1668,6 +1678,7 @@ def delete_staff(staff_id: int):
 @app.route("/documents/<int:doc_id>/edit", methods=["GET", "POST"])
 @login_required
 @require_active_agency
+@require_write_access
 def edit_document(doc_id: int):
     agency_id = session_agency_id()
     with get_db() as db:
@@ -1988,6 +1999,7 @@ def agency_export():
 @app.route("/agency/delete", methods=["GET", "POST"])
 @login_required
 @owner_required
+@require_write_access
 def agency_delete():
     agency_id = session_agency_id()
 
@@ -2527,6 +2539,7 @@ def admin_subscriptions():
 @app.route("/users/<int:uid>/role", methods=["POST"])
 @login_required
 @owner_required
+@require_write_access
 def update_user_role(uid: int):
     agency_id = session_agency_id()
     new_role = request.form.get("role", "MANAGER").upper()
@@ -2549,6 +2562,7 @@ def update_user_role(uid: int):
 @app.route("/users/<int:uid>/toggle-active", methods=["POST"])
 @login_required
 @owner_required
+@require_write_access
 def toggle_user_active(uid: int):
     agency_id = session_agency_id()
     if uid == session["user_id"]:
@@ -2573,6 +2587,7 @@ def toggle_user_active(uid: int):
 @app.route("/settings/notifications", methods=["GET", "POST"])
 @login_required
 @owner_required
+@require_write_access
 def notification_prefs():
     agency_id = session_agency_id()
 
@@ -2766,6 +2781,17 @@ def staff_self_service(token):
     if not tok or datetime.fromisoformat(tok["expires_at"]) < utcnow():
         return render_template("base.html", content_override="This upload link is invalid or expired."), 404
 
+    # Billing gate for self-service (public route)
+    agency = get_agency(int(tok["agency_id"]))
+    mode = billing_mode(row_to_dict(agency))
+
+    # Allow GET to show page, but block uploads when read-only/inactive
+    if request.method == "POST" and mode in ("INACTIVE", "GRACE_PERIOD"):
+        return render_template(
+            "base.html",
+            content_override="Uploads are temporarily disabled until billing is reactivated."
+        ), 403
+
     if request.method == "POST":
         doc_type = request.form.get("doc_type", "General").strip()
         expiry_date = request.form.get("expiry_date", "").strip()
@@ -2859,6 +2885,7 @@ def _api_auth():
 @app.route("/api/v1/keys", methods=["POST"])
 @login_required
 @owner_required
+@require_write_access
 def api_create_key():
     agency_id = session_agency_id()
     label = request.form.get("label", "default").strip()
