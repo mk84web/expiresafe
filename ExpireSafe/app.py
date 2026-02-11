@@ -554,18 +554,18 @@ def agency_is_active(agency) -> bool:
 
 def billing_mode(agency) -> str:
     """
-    Returns one of: ACTIVE, PAST_DUE, GRACE_PERIOD, INACTIVE
+    ACTIVE: paid and good
+    PAST_DUE: payment failed, but allow writes temporarily (Stripe retry window)
+    GRACE_PERIOD: cancelled/ended but still inside grace -> read-only
+    INACTIVE: no access except billing management
     """
     if not agency:
         return "INACTIVE"
-    return (agency.get("billing_status") or "INACTIVE").upper()
+    status = (agency.get("billing_status") if isinstance(agency, dict) else agency["billing_status"]) or "INACTIVE"
+    return str(status).upper()
 
 
 def can_write(agency) -> bool:
-    """
-    Writes allowed in ACTIVE + PAST_DUE only.
-    GRACE_PERIOD = read-only, INACTIVE = no access.
-    """
     mode = billing_mode(agency)
     return mode in ("ACTIVE", "PAST_DUE")
 
@@ -578,51 +578,43 @@ def plan_staff_limit(plan: str) -> int:
 def require_active_agency(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        agency_id = session.get("agency_id")
-        if not agency_id:
-            return fn(*args, **kwargs)
-        agency = get_agency(int(agency_id))
-        if not agency:
-            return fn(*args, **kwargs)
-        status = agency["billing_status"]
-        if status == "ACTIVE":
-            return fn(*args, **kwargs)
-        # Grace period: allow read-only access but block mutations
-        if status == "GRACE_PERIOD":
-            grace_end = agency.get("grace_period_end") or ""
-            if grace_end and datetime.fromisoformat(grace_end) > utcnow():
-                # Allow GET (read), block POST (writes)
-                if request.method == "POST":
-                    flash("Your subscription has lapsed. Renew to make changes.", "error")
-                    return redirect(url_for("billing"))
-                return fn(*args, **kwargs)
-        # PAST_DUE: show warning but allow access temporarily
-        if status == "PAST_DUE":
-            flash("Your payment is overdue. Please update your billing to avoid losing access.", "error")
-            return fn(*args, **kwargs)
-        # Fully locked out
-        flash("Your subscription is inactive. Please activate a plan to continue.", "error")
-        return redirect(url_for("billing"))
+        if "agency_id" not in session:
+            abort(403)
+
+        agency = get_agency(int(session["agency_id"]))
+        mode = billing_mode(agency)
+
+        if mode == "INACTIVE":
+            return redirect(url_for("billing"))
+
+        if mode == "GRACE_PERIOD":
+            # read-only: block POST
+            if request.method != "GET":
+                flash("Read-only during grace period. Please reactivate billing.", "error")
+                return redirect(url_for("billing"))
+
+        if mode == "PAST_DUE":
+            flash("Payment issue detected. Limited time access while Stripe retries.", "error")
+
+        return fn(*args, **kwargs)
     return wrapper
 
 
 def require_write_access(fn):
-    """Block all write operations when billing is GRACE_PERIOD or INACTIVE.
-    Billing routes should NOT use this decorator.
-    """
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        agency_id = session.get("agency_id")
-        if not agency_id:
+        if "agency_id" not in session:
             abort(403)
 
-        agency = get_agency(int(agency_id))
+        agency = get_agency(int(session["agency_id"]))
         mode = billing_mode(agency)
 
+        # Allow billing routes to manage subscription even if inactive (so don't decorate billing routes)
         if mode in ("INACTIVE", "GRACE_PERIOD"):
-            flash("Your plan is in read-only mode. Update billing to continue.", "error")
+            flash("Your account is read-only until billing is active.", "error")
             return redirect(url_for("billing"))
 
+        # ACTIVE / PAST_DUE
         return fn(*args, **kwargs)
     return wrapper
 
@@ -2783,14 +2775,9 @@ def staff_self_service(token):
 
     # Billing gate for self-service (public route)
     agency = get_agency(int(tok["agency_id"]))
-    mode = billing_mode(row_to_dict(agency))
 
-    # Allow GET to show page, but block uploads when read-only/inactive
-    if request.method == "POST" and mode in ("INACTIVE", "GRACE_PERIOD"):
-        return render_template(
-            "base.html",
-            content_override="Uploads are temporarily disabled until billing is reactivated."
-        ), 403
+    if request.method == "POST" and billing_mode(agency) in ("INACTIVE", "GRACE_PERIOD"):
+        abort(403)
 
     if request.method == "POST":
         doc_type = request.form.get("doc_type", "General").strip()
