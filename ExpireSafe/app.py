@@ -73,7 +73,7 @@ PLAN_LIMITS = {
 
 DEFAULT_PLAN = "ESSENTIAL"
 GRACE_PERIOD_DAYS = 7  # days after subscription lapses before full lockout
-BILLING_ENFORCEMENT = os.environ.get("BILLING_ENFORCEMENT", "true").lower() == "true"
+BILLING_ENFORCEMENT = os.environ.get("BILLING_ENFORCEMENT", "false").lower() == "true"
 
 DOC_PRESETS = {
     "UK": [
