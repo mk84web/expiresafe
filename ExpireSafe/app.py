@@ -523,7 +523,8 @@ def validate_password(pw: str) -> tuple[bool, str]:
 
 def get_agency(agency_id: int):
     with get_db() as db:
-        return db.execute("SELECT * FROM agencies WHERE id=?", (agency_id,)).fetchone()
+        row = db.execute("SELECT * FROM agencies WHERE id=?", (agency_id,)).fetchone()
+        return row_to_dict(row)
 
 
 def billing_mode(agency) -> str:
@@ -535,7 +536,7 @@ def billing_mode(agency) -> str:
     """
     if not agency:
         return "INACTIVE"
-    status = (agency.get("billing_status") if isinstance(agency, dict) else agency["billing_status"]) or "INACTIVE"
+    status = (agency.get("billing_status") or "INACTIVE")
     return str(status).upper()
 
 
@@ -555,11 +556,11 @@ def auto_expire_grace_if_needed(agency):
     if not agency:
         return
 
-    status = (agency.get("billing_status") if isinstance(agency, dict) else agency["billing_status"]) or ""
+    status = (agency.get("billing_status") or "")
     if status != "GRACE_PERIOD":
         return
 
-    grace_end = (agency.get("grace_period_end") if isinstance(agency, dict) else agency["grace_period_end"])
+    grace_end = agency.get("grace_period_end")
     if not grace_end:
         return
 
@@ -569,7 +570,7 @@ def auto_expire_grace_if_needed(agency):
         return
 
     if utcnow() >= grace_dt:
-        agency_id = int(agency.get("id") if isinstance(agency, dict) else agency["id"])
+        agency_id = int(agency.get("id", 0))
 
         # read from_status for audit
         with get_db() as db:
@@ -647,7 +648,7 @@ def require_active_agency(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if "agency_id" not in session:
-            abort(403)
+            return redirect(url_for("login"))
 
         agency = get_agency(int(session["agency_id"]))
         auto_expire_grace_if_needed(agency)
