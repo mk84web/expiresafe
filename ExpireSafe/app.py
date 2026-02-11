@@ -2118,10 +2118,17 @@ def billing():
         except Exception:
             pass
 
+    prices = {
+        "ESSENTIAL": os.environ.get("PRICE_ESSENTIAL", "£49/mo"),
+        "ENFORCED": os.environ.get("PRICE_ENFORCED", "£99/mo"),
+        "GOVERNED": os.environ.get("PRICE_GOVERNED", "£199/mo"),
+    }
+
     return render_template(
         "billing.html",
         agency=agency,
         limits=PLAN_LIMITS,
+        prices=prices,
         cancel_at_period_end=cancel_at_period_end,
         grace_period_days=GRACE_PERIOD_DAYS,
     )
