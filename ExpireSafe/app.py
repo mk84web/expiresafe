@@ -72,6 +72,7 @@ PLAN_LIMITS = {
 }
 
 DEFAULT_PLAN = "ESSENTIAL"
+GRACE_PERIOD_DAYS = 7  # days after subscription lapses before full lockout
 
 DOC_PRESETS = {
     "UK": [
@@ -403,6 +404,12 @@ def ensure_schema_additions():
         acols2 = [r["name"] for r in db.execute("PRAGMA table_info(agencies)").fetchall()]
         if "reminder_windows" not in acols2:
             db.execute("ALTER TABLE agencies ADD COLUMN reminder_windows TEXT;")  # JSON, e.g. "[7,14,30]"
+        if "grace_period_end" not in acols2:
+            db.execute("ALTER TABLE agencies ADD COLUMN grace_period_end TEXT;")  # ISO datetime
+        if "payment_failure_count" not in acols2:
+            db.execute("ALTER TABLE agencies ADD COLUMN payment_failure_count INTEGER NOT NULL DEFAULT 0;")
+        if "last_payment_error" not in acols2:
+            db.execute("ALTER TABLE agencies ADD COLUMN last_payment_error TEXT;")
 
         db.commit()
 
@@ -553,8 +560,31 @@ def plan_staff_limit(plan: str) -> int:
 def require_active_agency(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        # BILLING DISABLED — skip subscription check so all pages are accessible
-        return fn(*args, **kwargs)
+        agency_id = session.get("agency_id")
+        if not agency_id:
+            return fn(*args, **kwargs)
+        agency = get_agency(int(agency_id))
+        if not agency:
+            return fn(*args, **kwargs)
+        status = agency["billing_status"]
+        if status == "ACTIVE":
+            return fn(*args, **kwargs)
+        # Grace period: allow read-only access but block mutations
+        if status == "GRACE_PERIOD":
+            grace_end = agency.get("grace_period_end") or ""
+            if grace_end and datetime.fromisoformat(grace_end) > utcnow():
+                # Allow GET (read), block POST (writes)
+                if request.method == "POST":
+                    flash("Your subscription has lapsed. Renew to make changes.", "error")
+                    return redirect(url_for("billing"))
+                return fn(*args, **kwargs)
+        # PAST_DUE: show warning but allow access temporarily
+        if status == "PAST_DUE":
+            flash("Your payment is overdue. Please update your billing to avoid losing access.", "error")
+            return fn(*args, **kwargs)
+        # Fully locked out
+        flash("Your subscription is inactive. Please activate a plan to continue.", "error")
+        return redirect(url_for("billing"))
     return wrapper
 
 
@@ -1965,7 +1995,27 @@ def agency_delete():
 def billing():
     agency_id = session_agency_id()
     agency = get_agency(agency_id)
-    return render_template("billing.html", agency=agency, limits=PLAN_LIMITS)
+
+    # Check if subscription is scheduled for cancellation
+    cancel_at_period_end = False
+    sub_id = agency.get("stripe_subscription_id") if agency else None
+    if sub_id and agency.get("billing_status") == "ACTIVE":
+        try:
+            import stripe
+            stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
+            if stripe.api_key:
+                sub = stripe.Subscription.retrieve(sub_id)
+                cancel_at_period_end = sub.get("cancel_at_period_end", False)
+        except Exception:
+            pass
+
+    return render_template(
+        "billing.html",
+        agency=agency,
+        limits=PLAN_LIMITS,
+        cancel_at_period_end=cancel_at_period_end,
+        grace_period_days=GRACE_PERIOD_DAYS,
+    )
 
 
 @app.route("/billing/checkout", methods=["POST"])
@@ -2063,6 +2113,18 @@ def create_checkout_session():
         )
         db.commit()
 
+    # --- Prevent duplicate subscriptions ---
+    existing_sub_id = agency.get("stripe_subscription_id")
+    if existing_sub_id and agency.get("billing_status") == "ACTIVE":
+        # Check if the existing subscription is still active in Stripe
+        try:
+            existing_sub = stripe.Subscription.retrieve(existing_sub_id)
+            if existing_sub["status"] in ("active", "trialing"):
+                flash("You already have an active subscription. Cancel it first to switch plans.", "error")
+                return redirect(url_for("billing"))
+        except Exception:
+            pass  # Subscription not found in Stripe; allow creating a new one
+
     plan = request.form.get("plan", DEFAULT_PLAN).upper()
     price_map = {
         "ESSENTIAL": os.environ.get("STRIPE_PRICE_ESSENTIAL"),
@@ -2096,6 +2158,71 @@ def create_checkout_session():
 @owner_required
 def billing_success():
     flash("Payment started. If complete, your plan will activate within seconds.", "ok")
+    return redirect(url_for("billing"))
+
+
+@app.route("/billing/cancel", methods=["POST"])
+@login_required
+@owner_required
+def billing_cancel():
+    """Cancel the current Stripe subscription."""
+    import stripe
+    stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
+    if not stripe.api_key:
+        flash("Billing system not configured.", "error")
+        return redirect(url_for("billing"))
+
+    agency_id = session_agency_id()
+    agency = get_agency(agency_id)
+    sub_id = agency.get("stripe_subscription_id") if agency else None
+
+    if not sub_id:
+        flash("No active subscription found.", "error")
+        return redirect(url_for("billing"))
+
+    try:
+        # Cancel at period end so user keeps access until billing cycle ends
+        stripe.Subscription.modify(sub_id, cancel_at_period_end=True)
+        flash("Your subscription will cancel at the end of the current billing period. "
+              "You'll retain access until then.", "ok")
+        audit("SUBSCRIPTION_CANCEL_SCHEDULED", "agency", agency_id, {"subscription_id": sub_id})
+    except stripe.error.InvalidRequestError:
+        # Subscription already cancelled or not found
+        flash("Subscription not found or already cancelled.", "error")
+    except Exception as e:
+        app.logger.exception("Failed to cancel subscription %s", sub_id)
+        flash("Failed to cancel subscription. Please try again or contact support.", "error")
+
+    return redirect(url_for("billing"))
+
+
+@app.route("/billing/reactivate", methods=["POST"])
+@login_required
+@owner_required
+def billing_reactivate():
+    """Reactivate a subscription that was scheduled for cancellation."""
+    import stripe
+    stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
+    if not stripe.api_key:
+        flash("Billing system not configured.", "error")
+        return redirect(url_for("billing"))
+
+    agency_id = session_agency_id()
+    agency = get_agency(agency_id)
+    sub_id = agency.get("stripe_subscription_id") if agency else None
+
+    if not sub_id:
+        flash("No subscription found.", "error")
+        return redirect(url_for("billing"))
+
+    try:
+        stripe.Subscription.modify(sub_id, cancel_at_period_end=False)
+        flash("Subscription reactivated. You'll continue to be billed as normal.", "ok")
+        audit("SUBSCRIPTION_REACTIVATED", "agency", agency_id, {"subscription_id": sub_id})
+    except Exception as e:
+        app.logger.exception("Failed to reactivate subscription %s", sub_id)
+        flash("Failed to reactivate. Please try again.", "error")
+
     return redirect(url_for("billing"))
 
 
@@ -2138,14 +2265,47 @@ def stripe_webhook():
                 SET billing_status='ACTIVE',
                     plan=?,
                     stripe_subscription_id=?,
-                    current_period_end=?
+                    current_period_end=?,
+                    grace_period_end=NULL,
+                    payment_failure_count=0,
+                    last_payment_error=NULL
                 WHERE id=?
             """, (plan, sub_id, period_end_iso, agency_id))
             db.commit()
 
+    def set_grace_period(agency_id: int):
+        """Transition agency to grace period instead of immediate lockout."""
+        grace_end = (utcnow() + timedelta(days=GRACE_PERIOD_DAYS)).isoformat()
+        with get_db() as db:
+            db.execute("""
+                UPDATE agencies
+                SET billing_status='GRACE_PERIOD',
+                    grace_period_end=?
+                WHERE id=?
+            """, (grace_end, agency_id))
+            db.commit()
+
+    def set_past_due(agency_id: int, error_msg: str = None):
+        """Mark agency as past due (payment failed but subscription not yet cancelled)."""
+        with get_db() as db:
+            db.execute("""
+                UPDATE agencies
+                SET billing_status='PAST_DUE',
+                    payment_failure_count = payment_failure_count + 1,
+                    last_payment_error=?
+                WHERE id=?
+            """, (error_msg, agency_id))
+            db.commit()
+
     def set_inactive(agency_id: int):
         with get_db() as db:
-            db.execute("UPDATE agencies SET billing_status='INACTIVE' WHERE id=?", (agency_id,))
+            db.execute("""
+                UPDATE agencies
+                SET billing_status='INACTIVE',
+                    stripe_subscription_id=NULL,
+                    grace_period_end=NULL
+                WHERE id=?
+            """, (agency_id,))
             db.commit()
 
     try:
@@ -2170,17 +2330,55 @@ def stripe_webhook():
                 agency = db.execute("SELECT * FROM agencies WHERE stripe_customer_id=?", (customer_id,)).fetchone()
 
             if agency:
+                aid = int(agency["id"])
                 if status in ("active", "trialing"):
-                    set_active(int(agency["id"]), agency["plan"], sub_id, period_end)
+                    set_active(aid, agency["plan"], sub_id, period_end)
+                elif status == "past_due":
+                    set_past_due(aid, "Subscription payment past due")
+                elif status in ("canceled", "unpaid"):
+                    set_grace_period(aid)
                 else:
-                    set_inactive(int(agency["id"]))
+                    set_inactive(aid)
 
         elif etype == "customer.subscription.deleted":
             customer_id = obj["customer"]
             with get_db() as db:
                 agency = db.execute("SELECT * FROM agencies WHERE stripe_customer_id=?", (customer_id,)).fetchone()
             if agency:
-                set_inactive(int(agency["id"]))
+                set_grace_period(int(agency["id"]))
+
+        # Failed payment handling
+        elif etype == "invoice.payment_failed":
+            customer_id = obj.get("customer")
+            if customer_id:
+                with get_db() as db:
+                    agency = db.execute("SELECT * FROM agencies WHERE stripe_customer_id=?", (customer_id,)).fetchone()
+                if agency:
+                    attempt = obj.get("attempt_count", 1)
+                    error_msg = ""
+                    charge = obj.get("charge")
+                    if isinstance(obj.get("last_payment_error"), dict):
+                        error_msg = obj["last_payment_error"].get("message", "Payment failed")
+                    else:
+                        error_msg = f"Payment failed (attempt {attempt})"
+                    set_past_due(int(agency["id"]), error_msg)
+
+                    # Notify agency owners about failed payment
+                    with get_db() as db:
+                        owners = db.execute(
+                            "SELECT email FROM users WHERE agency_id=? AND role='OWNER'",
+                            (agency["id"],)
+                        ).fetchall()
+                    for o in owners:
+                        if o["email"]:
+                            send_email_async(
+                                o["email"],
+                                "[ExpireSafe] Payment failed — action required",
+                                f"Hi,\n\nWe were unable to process your payment for {agency['name']}.\n\n"
+                                f"Reason: {error_msg}\n\n"
+                                f"Please update your payment method to avoid losing access.\n\n"
+                                f"— ExpireSafe"
+                            )
     except Exception:
         logging.exception("Stripe webhook processing error for event %s", event_id)
         # Still return 200 — the event is recorded, don't let Stripe retry endlessly

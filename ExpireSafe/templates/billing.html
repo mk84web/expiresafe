@@ -3,7 +3,50 @@
 {% block content %}
 <div class="max-w-3xl mx-auto">
 
-  {% if agency.billing_status != 'ACTIVE' %}
+  {# ---- PAST DUE BANNER ---- #}
+  {% if agency.billing_status == 'PAST_DUE' %}
+  <div class="bg-red-100 dark:bg-red-900 border border-red-300 dark:border-red-700 rounded-lg p-5 mb-6">
+    <div class="flex items-start gap-3">
+      <svg class="w-6 h-6 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+      <div>
+        <h3 class="font-bold text-red-800 dark:text-red-200">Payment Failed</h3>
+        <p class="text-sm text-red-700 dark:text-red-300 mt-1">
+          We couldn't process your last payment.
+          {% if agency.last_payment_error %}
+          <br><span class="text-xs">{{ agency.last_payment_error }}</span>
+          {% endif %}
+        </p>
+        <p class="text-sm text-red-700 dark:text-red-300 mt-2">
+          Please update your payment method below to avoid losing access.
+        </p>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ---- GRACE PERIOD BANNER ---- #}
+  {% if agency.billing_status == 'GRACE_PERIOD' %}
+  <div class="bg-amber-100 dark:bg-amber-900 border border-amber-300 dark:border-amber-700 rounded-lg p-5 mb-6">
+    <div class="flex items-start gap-3">
+      <svg class="w-6 h-6 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <div>
+        <h3 class="font-bold text-amber-800 dark:text-amber-200">Grace Period Active</h3>
+        <p class="text-sm text-amber-700 dark:text-amber-300 mt-1">
+          Your subscription has ended. You have <strong>{{ grace_period_days }} days</strong> to resubscribe before your data becomes read-only.
+          {% if agency.grace_period_end %}
+          <br>Grace period expires: <strong>{{ agency.grace_period_end[:10] }}</strong>
+          {% endif %}
+        </p>
+        <p class="text-sm text-amber-700 dark:text-amber-300 mt-2">
+          During the grace period you can view data but cannot add or update staff/documents.
+        </p>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ---- INACTIVE - LOCKED OUT ---- #}
+  {% if agency.billing_status not in ('ACTIVE', 'PAST_DUE', 'GRACE_PERIOD') %}
   <div class="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-8 text-center mb-8">
     <h1 class="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4">Your agency is set up.</h1>
     <p class="text-slate-600 dark:text-slate-400 mb-6">
@@ -16,7 +59,9 @@
       <li>✓ Your data remains protected</li>
     </ul>
   </div>
-  {% else %}
+
+  {# ---- ACTIVE STATUS ---- #}
+  {% elif agency.billing_status == 'ACTIVE' %}
   <div class="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-6 mb-8">
     <h1 class="text-2xl font-semibold">Billing</h1>
     <div class="text-sm text-slate-600 dark:text-slate-400 mt-1">
@@ -25,17 +70,24 @@
       {% if agency.current_period_end %}
       • Renews: {{ agency.current_period_end[:10] }}
       {% endif %}
+      {% if cancel_at_period_end %}
+      <span class="ml-2 text-amber-600 dark:text-amber-400 font-semibold">• Cancels at period end</span>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ---- PAST DUE / GRACE STATUS HEADER ---- #}
+  {% else %}
+  <div class="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-6 mb-8">
+    <h1 class="text-2xl font-semibold">Billing</h1>
+    <div class="text-sm text-slate-600 dark:text-slate-400 mt-1">
+      Status: <span class="font-semibold text-amber-600 dark:text-amber-400">{{ agency.billing_status }}</span> •
+      Plan: <span class="font-semibold">{{ agency.plan }}</span>
     </div>
   </div>
   {% endif %}
 
-  {% if session.get("user_id") and session.get("role") == "OWNER" and agency and agency["billing_status"] != "ACTIVE" %}
-  <div class="alert alert-warning">
-    Your subscription is inactive. Please update billing to restore access.
-    <a href="{{ url_for('billing') }}">Go to Billing</a>
-  </div>
-  {% endif %}
-
+  {# ---- PLAN CARDS ---- #}
   <div class="grid md:grid-cols-3 gap-4">
     {% for p in ["ESSENTIAL","ENFORCED","GOVERNED"] %}
     <div class="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-5 {{ 'ring-2 ring-indigo-500' if agency.plan == p and agency.billing_status == 'ACTIVE' else '' }}">
@@ -47,13 +99,13 @@
       <form method="post" action="{{ url_for('create_checkout_session') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="plan" value="{{ p }}">
-        {% if agency.plan == p and agency.billing_status == 'ACTIVE' %}
+        {% if agency.plan == p and agency.billing_status == 'ACTIVE' and not cancel_at_period_end %}
         <button disabled class="w-full bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400 rounded px-4 py-2 text-sm cursor-not-allowed">
           Current Plan
         </button>
         {% else %}
         <button class="w-full bg-indigo-600 text-white rounded px-4 py-2 text-sm hover:bg-indigo-700">
-          {% if agency.billing_status != 'ACTIVE' %}
+          {% if agency.billing_status not in ('ACTIVE',) %}
           Activate reminders &amp; reports
           {% else %}
           Switch to {{ p }}
@@ -64,6 +116,56 @@
     </div>
     {% endfor %}
   </div>
+
+  {# ---- CANCELLATION / REACTIVATION SECTION ---- #}
+  {% if agency.billing_status == 'ACTIVE' and agency.stripe_subscription_id %}
+  <div class="mt-10 border-t dark:border-slate-700 pt-8">
+    {% if cancel_at_period_end %}
+    {# Subscription is scheduled for cancellation #}
+    <div class="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg p-5">
+      <h3 class="font-semibold text-amber-800 dark:text-amber-200">Subscription Cancelling</h3>
+      <p class="text-sm text-amber-700 dark:text-amber-300 mt-1">
+        Your subscription is scheduled to cancel at the end of the current billing period
+        {% if agency.current_period_end %}({{ agency.current_period_end[:10] }}){% endif %}.
+        You'll retain full access until then.
+      </p>
+      <form method="post" action="{{ url_for('billing_reactivate') }}" class="mt-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="bg-green-600 text-white rounded px-4 py-2 text-sm hover:bg-green-700">
+          Keep My Subscription
+        </button>
+      </form>
+    </div>
+    {% else %}
+    {# Active subscription — show cancel option #}
+    <details class="group">
+      <summary class="cursor-pointer text-sm text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400">
+        Cancel subscription&hellip;
+      </summary>
+      <div class="mt-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-5">
+        <h3 class="font-semibold text-red-800 dark:text-red-200">Cancel Subscription</h3>
+        <p class="text-sm text-red-700 dark:text-red-300 mt-1">
+          Your access will continue until the end of the current billing period
+          {% if agency.current_period_end %}({{ agency.current_period_end[:10] }}){% endif %}.
+          After that, you'll have a {{ grace_period_days }}-day grace period with read-only access before full lockout.
+        </p>
+        <ul class="text-sm text-red-700 dark:text-red-300 mt-2 space-y-1">
+          <li>• No new staff or documents can be added after the period ends</li>
+          <li>• Your data will be preserved and accessible if you resubscribe</li>
+          <li>• Email reminders will stop</li>
+        </ul>
+        <form method="post" action="{{ url_for('billing_cancel') }}" class="mt-4"
+              onsubmit="return confirm('Are you sure you want to cancel your subscription?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="bg-red-600 text-white rounded px-4 py-2 text-sm hover:bg-red-700">
+            Cancel at End of Period
+          </button>
+        </form>
+      </div>
+    </details>
+    {% endif %}
+  </div>
+  {% endif %}
 
   <p class="text-center text-sm text-slate-500 dark:text-slate-400 mt-6">
     Cancel anytime. No long-term contracts.
