@@ -588,6 +588,38 @@ def require_active_agency(fn):
     return wrapper
 
 
+def require_write_access(fn):
+    """Block all write operations when billing is GRACE_PERIOD (expired grace) or INACTIVE.
+    Use on POST-only mutation routes for explicit write gating.
+    PAST_DUE still allows writes (temporary leniency while payment retries).
+    """
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        agency_id = session.get("agency_id")
+        if not agency_id:
+            return fn(*args, **kwargs)
+        agency = get_agency(int(agency_id))
+        if not agency:
+            return fn(*args, **kwargs)
+        status = agency["billing_status"]
+        if status == "ACTIVE":
+            return fn(*args, **kwargs)
+        if status == "PAST_DUE":
+            # Allow writes but warn — payment is still being retried
+            return fn(*args, **kwargs)
+        if status == "GRACE_PERIOD":
+            grace_end = agency.get("grace_period_end") or ""
+            if grace_end and datetime.fromisoformat(grace_end) > utcnow():
+                flash("Your subscription has lapsed. Read-only access during grace period.", "error")
+            else:
+                flash("Your grace period has expired. Please resubscribe to make changes.", "error")
+            return redirect(url_for("billing"))
+        # INACTIVE or unknown
+        flash("Your subscription is inactive. Please activate a plan to make changes.", "error")
+        return redirect(url_for("billing"))
+    return wrapper
+
+
 def enforce_staff_limit(agency_id: int):
     agency = get_agency(agency_id)
     limit = plan_staff_limit(agency["plan"])
@@ -1561,6 +1593,7 @@ def download_document(doc_id: int):
 @app.route("/documents/<int:doc_id>/delete", methods=["POST"])
 @login_required
 @require_active_agency
+@require_write_access
 def delete_document(doc_id: int):
     agency_id = session_agency_id()
     with get_db() as db:
@@ -1594,6 +1627,7 @@ def delete_document(doc_id: int):
 @login_required
 @owner_required
 @require_active_agency
+@require_write_access
 def delete_staff(staff_id: int):
     agency_id = session_agency_id()
     with get_db() as db:
@@ -1686,6 +1720,7 @@ def edit_document(doc_id: int):
 @app.route("/documents/<int:doc_id>/renew", methods=["POST"])
 @login_required
 @require_active_agency
+@require_write_access
 def renew_document(doc_id: int):
     agency_id = session_agency_id()
     with get_db() as db:
@@ -1715,6 +1750,7 @@ def renew_document(doc_id: int):
 @app.route("/staff/<int:staff_id>/bulk-upload", methods=["POST"])
 @login_required
 @require_active_agency
+@require_write_access
 def bulk_upload(staff_id: int):
     agency_id = session_agency_id()
     with get_db() as db:
@@ -1769,6 +1805,7 @@ def bulk_upload(staff_id: int):
 @login_required
 @owner_required
 @require_active_agency
+@require_write_access
 def archive_staff(staff_id: int):
     agency_id = session_agency_id()
     with get_db() as db:
@@ -1788,6 +1825,7 @@ def archive_staff(staff_id: int):
 @login_required
 @owner_required
 @require_active_agency
+@require_write_access
 def restore_staff(staff_id: int):
     agency_id = session_agency_id()
     with get_db() as db:
@@ -2776,6 +2814,7 @@ def staff_self_service(token):
 @app.route("/staff/<int:staff_id>/create-upload-link", methods=["POST"])
 @login_required
 @require_active_agency
+@require_write_access
 def create_upload_link(staff_id: int):
     agency_id = session_agency_id()
     with get_db() as db:
