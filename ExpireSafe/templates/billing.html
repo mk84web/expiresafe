@@ -47,35 +47,6 @@
 
   {# ---- INACTIVE - LOCKED OUT ---- #}
   {% if agency.billing_status not in ('ACTIVE', 'PAST_DUE', 'GRACE_PERIOD') %}
-  <div class="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-8 text-center mb-8">
-    <h1 class="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-4">Your agency is set up.</h1>
-    <p class="text-slate-600 dark:text-slate-400 mb-6">
-      You've added staff and documents successfully.<br>
-      To activate email reminders, reports, and ongoing tracking, choose a plan below.
-    </p>
-    <ul class="text-sm text-slate-600 dark:text-slate-400 mb-6 space-y-1">
-      <li>✓ This ensures reminders are sent on time</li>
-      <li>✓ Reports stay accurate</li>
-      <li>✓ Your data remains protected</li>
-    </ul>
-    <div class="flex flex-wrap justify-center gap-3">
-      <form method="POST" action="{{ url_for('create_checkout_session') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="plan" value="ESSENTIAL">
-        <button type="submit" class="btn bg-indigo-600 text-white rounded px-5 py-2 text-sm hover:bg-indigo-700">Activate Essential</button>
-      </form>
-      <form method="POST" action="{{ url_for('create_checkout_session') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="plan" value="ENFORCED">
-        <button type="submit" class="btn bg-indigo-600 text-white rounded px-5 py-2 text-sm hover:bg-indigo-700">Activate Enforced</button>
-      </form>
-      <form method="POST" action="{{ url_for('create_checkout_session') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="plan" value="GOVERNED">
-        <button type="submit" class="btn bg-indigo-600 text-white rounded px-5 py-2 text-sm hover:bg-indigo-700">Activate Governed</button>
-      </form>
-    </div>
-  </div>
 
   {# ---- ACTIVE STATUS ---- #}
   {% elif agency.billing_status == 'ACTIVE' %}
