@@ -211,28 +211,71 @@ def row_to_dict(row):
         return None
 
 
-def init_db():
-    with get_db() as db:
-        db.execute("PRAGMA foreign_keys = ON;")
-        db.execute("PRAGMA journal_mode=WAL;")
+def _is_postgres():
+    return DATABASE_URL is not None
 
-        db.execute("""
+
+def _get_table_columns(db, table_name):
+    """Get column names for a table, works on both SQLite and Postgres."""
+    if _is_postgres():
+        rows = db.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = %s",
+            (table_name,)
+        ).fetchall()
+        return [r["column_name"] for r in rows]
+    else:
+        rows = db.execute(f"PRAGMA table_info({table_name})").fetchall()
+        return [r["name"] for r in rows]
+
+
+def _safe_add_column(db, table, column, col_type):
+    """Add a column if it doesn't exist (safe for both SQLite and Postgres)."""
+    if _is_postgres():
+        db.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type};")
+    else:
+        cols = _get_table_columns(db, table)
+        if column not in cols:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type};")
+
+
+def _pk_type():
+    """Return the correct primary key type for the current DB."""
+    if _is_postgres():
+        return "SERIAL PRIMARY KEY"
+    return "INTEGER PRIMARY KEY AUTOINCREMENT"
+
+
+def _param(name=None):
+    """Return the correct parameter placeholder for the current DB."""
+    if _is_postgres():
+        return "%s"
+    return "?"
+
+
+def init_db():
+    pk = _pk_type()
+    with get_db() as db:
+        if not _is_postgres():
+            db.execute("PRAGMA foreign_keys = ON;")
+            db.execute("PRAGMA journal_mode=WAL;")
+
+        db.execute(f"""
         CREATE TABLE IF NOT EXISTS agencies (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             name TEXT NOT NULL UNIQUE,
-            country TEXT NOT NULL, -- 'UK' or 'US'
+            country TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
         """)
 
-        db.execute("""
+        db.execute(f"""
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             agency_id INTEGER NOT NULL,
             username TEXT NOT NULL,
             email TEXT NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL, -- 'OWNER' or 'MANAGER'
+            role TEXT NOT NULL,
             created_at TEXT NOT NULL,
             UNIQUE(agency_id, username),
             UNIQUE(agency_id, email),
@@ -240,9 +283,9 @@ def init_db():
         );
         """)
 
-        db.execute("""
+        db.execute(f"""
         CREATE TABLE IF NOT EXISTS staff (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             agency_id INTEGER NOT NULL,
             full_name TEXT NOT NULL,
             role TEXT,
@@ -252,13 +295,13 @@ def init_db():
         );
         """)
 
-        db.execute("""
+        db.execute(f"""
         CREATE TABLE IF NOT EXISTS documents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             agency_id INTEGER NOT NULL,
             staff_id INTEGER NOT NULL,
             doc_type TEXT NOT NULL,
-            expiry_date TEXT NOT NULL, -- ISO YYYY-MM-DD
+            expiry_date TEXT NOT NULL,
             file_path TEXT,
             uploaded_at TEXT NOT NULL,
             FOREIGN KEY (agency_id) REFERENCES agencies(id) ON DELETE CASCADE,
@@ -266,9 +309,9 @@ def init_db():
         );
         """)
 
-        db.execute("""
+        db.execute(f"""
         CREATE TABLE IF NOT EXISTS audit_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             agency_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
             username TEXT NOT NULL,
@@ -284,9 +327,9 @@ def init_db():
         );
         """)
 
-        db.execute("""
+        db.execute(f"""
         CREATE TABLE IF NOT EXISTS system_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             level TEXT NOT NULL,
             message TEXT NOT NULL,
             created_at TEXT NOT NULL
@@ -295,7 +338,7 @@ def init_db():
 
         db.execute("""
         CREATE TABLE IF NOT EXISTS stripe_events (
-            id TEXT PRIMARY KEY,      -- Stripe event ID; PRIMARY KEY = UNIQUE, used for idempotency
+            id TEXT PRIMARY KEY,
             created_at TEXT NOT NULL
         );
         """)
@@ -304,55 +347,39 @@ def init_db():
 
 
 def ensure_schema_additions():
-    """Add columns without migration tooling (safe for SQLite MVP)."""
+    """Add columns without migration tooling (safe for both SQLite and Postgres)."""
+    pk = _pk_type()
     with get_db() as db:
         # users columns
-        ucols = [r["name"] for r in db.execute("PRAGMA table_info(users)").fetchall()]
-        if "must_change_password" not in ucols:
-            db.execute("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0;")
-        if "totp_secret" not in ucols:
-            db.execute("ALTER TABLE users ADD COLUMN totp_secret TEXT;")
-        if "totp_enabled" not in ucols:
-            db.execute("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0;")
-        if "is_active" not in ucols:
-            db.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;")
+        _safe_add_column(db, "users", "must_change_password", "INTEGER NOT NULL DEFAULT 0")
+        _safe_add_column(db, "users", "totp_secret", "TEXT")
+        _safe_add_column(db, "users", "totp_enabled", "INTEGER NOT NULL DEFAULT 0")
+        _safe_add_column(db, "users", "is_active", "INTEGER NOT NULL DEFAULT 1")
         db.commit()
 
         # agencies columns
-        acols = [r["name"] for r in db.execute("PRAGMA table_info(agencies)").fetchall()]
-        if "plan" not in acols:
-            db.execute("ALTER TABLE agencies ADD COLUMN plan TEXT NOT NULL DEFAULT 'ESSENTIAL';")
-        if "billing_status" not in acols:
-            db.execute("ALTER TABLE agencies ADD COLUMN billing_status TEXT NOT NULL DEFAULT 'INACTIVE';")
-        if "stripe_customer_id" not in acols:
-            db.execute("ALTER TABLE agencies ADD COLUMN stripe_customer_id TEXT;")
-        if "stripe_subscription_id" not in acols:
-            db.execute("ALTER TABLE agencies ADD COLUMN stripe_subscription_id TEXT;")
-        if "current_period_end" not in acols:
-            db.execute("ALTER TABLE agencies ADD COLUMN current_period_end TEXT;")
-        if "reminder_windows" not in acols:
-            db.execute("ALTER TABLE agencies ADD COLUMN reminder_windows TEXT;")  # JSON, e.g. "[7,14,30]"
-        if "grace_period_end" not in acols:
-            db.execute("ALTER TABLE agencies ADD COLUMN grace_period_end TEXT;")  # ISO datetime
-        if "payment_failure_count" not in acols:
-            db.execute("ALTER TABLE agencies ADD COLUMN payment_failure_count INTEGER NOT NULL DEFAULT 0;")
-        if "last_payment_error" not in acols:
-            db.execute("ALTER TABLE agencies ADD COLUMN last_payment_error TEXT;")
+        _safe_add_column(db, "agencies", "plan", "TEXT DEFAULT 'ESSENTIAL'")
+        _safe_add_column(db, "agencies", "billing_status", "TEXT DEFAULT 'INACTIVE'")
+        _safe_add_column(db, "agencies", "stripe_customer_id", "TEXT")
+        _safe_add_column(db, "agencies", "stripe_subscription_id", "TEXT")
+        _safe_add_column(db, "agencies", "current_period_end", "TEXT")
+        _safe_add_column(db, "agencies", "reminder_windows", "TEXT")
+        _safe_add_column(db, "agencies", "grace_period_end", "TEXT")
+        _safe_add_column(db, "agencies", "payment_failure_count", "INTEGER NOT NULL DEFAULT 0")
+        _safe_add_column(db, "agencies", "last_payment_error", "TEXT")
         db.commit()
 
         # staff columns
-        scols = [r["name"] for r in db.execute("PRAGMA table_info(staff)").fetchall()]
-        if "archived_at" not in scols:
-            db.execute("ALTER TABLE staff ADD COLUMN archived_at TEXT;")
+        _safe_add_column(db, "staff", "archived_at", "TEXT")
         db.commit()
 
         # invites table
-        db.execute("""
+        db.execute(f"""
         CREATE TABLE IF NOT EXISTS invites (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             agency_id INTEGER NOT NULL,
             email TEXT NOT NULL,
-            role TEXT NOT NULL, -- 'MANAGER' or 'OWNER'
+            role TEXT NOT NULL,
             token TEXT NOT NULL UNIQUE,
             expires_at TEXT NOT NULL,
             used_at TEXT,
@@ -364,9 +391,9 @@ def ensure_schema_additions():
         """)
 
         # Self-service upload tokens (#13)
-        db.execute("""
+        db.execute(f"""
         CREATE TABLE IF NOT EXISTS staff_upload_tokens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             agency_id INTEGER NOT NULL,
             staff_id INTEGER NOT NULL,
             token TEXT NOT NULL UNIQUE,
@@ -378,9 +405,9 @@ def ensure_schema_additions():
         """)
 
         # API keys (#19)
-        db.execute("""
+        db.execute(f"""
         CREATE TABLE IF NOT EXISTS api_keys (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             agency_id INTEGER NOT NULL,
             key_hash TEXT NOT NULL,
             label TEXT NOT NULL,
