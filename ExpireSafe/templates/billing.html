@@ -47,6 +47,12 @@
 
   {# ---- INACTIVE - LOCKED OUT ---- #}
   {% if agency.billing_status not in ('ACTIVE', 'PAST_DUE', 'GRACE_PERIOD') %}
+  <div class="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-6 mb-8">
+    <h1 class="text-2xl font-semibold">Billing</h1>
+    <p class="text-sm text-slate-600 dark:text-slate-400 mt-1">
+      Choose a plan below to activate reminders, reports, and ongoing tracking.
+    </p>
+  </div>
 
   {# ---- ACTIVE STATUS ---- #}
   {% elif agency.billing_status == 'ACTIVE' %}
