@@ -305,30 +305,19 @@ def init_db():
 def ensure_schema_additions():
     """Add columns without migration tooling (safe for SQLite MVP)."""
     with get_db() as db:
-        # system_log exists
-        db.execute("""
-        CREATE TABLE IF NOT EXISTS system_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            level TEXT NOT NULL,
-            message TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-        """)
-        # stripe_events – idempotency table (PK = unique constraint on event id)
-        db.execute("""
-        CREATE TABLE IF NOT EXISTS stripe_events (
-            id TEXT PRIMARY KEY,      -- Stripe event ID; used for webhook dedup
-            created_at TEXT NOT NULL
-        );
-        """)
-
-        # users.must_change_password
-        cols = [r["name"] for r in db.execute("PRAGMA table_info(users)").fetchall()]
-        if "must_change_password" not in cols:
+        # users columns
+        ucols = [r["name"] for r in db.execute("PRAGMA table_info(users)").fetchall()]
+        if "must_change_password" not in ucols:
             db.execute("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0;")
-            db.commit()
+        if "totp_secret" not in ucols:
+            db.execute("ALTER TABLE users ADD COLUMN totp_secret TEXT;")
+        if "totp_enabled" not in ucols:
+            db.execute("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0;")
+        if "is_active" not in ucols:
+            db.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;")
+        db.commit()
 
-        # agencies billing fields
+        # agencies columns
         acols = [r["name"] for r in db.execute("PRAGMA table_info(agencies)").fetchall()]
         if "plan" not in acols:
             db.execute("ALTER TABLE agencies ADD COLUMN plan TEXT NOT NULL DEFAULT 'ESSENTIAL';")
@@ -340,6 +329,20 @@ def ensure_schema_additions():
             db.execute("ALTER TABLE agencies ADD COLUMN stripe_subscription_id TEXT;")
         if "current_period_end" not in acols:
             db.execute("ALTER TABLE agencies ADD COLUMN current_period_end TEXT;")
+        if "reminder_windows" not in acols:
+            db.execute("ALTER TABLE agencies ADD COLUMN reminder_windows TEXT;")  # JSON, e.g. "[7,14,30]"
+        if "grace_period_end" not in acols:
+            db.execute("ALTER TABLE agencies ADD COLUMN grace_period_end TEXT;")  # ISO datetime
+        if "payment_failure_count" not in acols:
+            db.execute("ALTER TABLE agencies ADD COLUMN payment_failure_count INTEGER NOT NULL DEFAULT 0;")
+        if "last_payment_error" not in acols:
+            db.execute("ALTER TABLE agencies ADD COLUMN last_payment_error TEXT;")
+        db.commit()
+
+        # staff columns
+        scols = [r["name"] for r in db.execute("PRAGMA table_info(staff)").fetchall()]
+        if "archived_at" not in scols:
+            db.execute("ALTER TABLE staff ADD COLUMN archived_at TEXT;")
         db.commit()
 
         # invites table
@@ -385,31 +388,6 @@ def ensure_schema_additions():
             FOREIGN KEY (agency_id) REFERENCES agencies(id) ON DELETE CASCADE
         );
         """)
-
-        # users: totp_secret, is_active columns
-        ucols = [r["name"] for r in db.execute("PRAGMA table_info(users)").fetchall()]
-        if "totp_secret" not in ucols:
-            db.execute("ALTER TABLE users ADD COLUMN totp_secret TEXT;")
-        if "totp_enabled" not in ucols:
-            db.execute("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0;")
-        if "is_active" not in ucols:
-            db.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;")
-
-        # staff: archived_at column for soft-delete (#17)
-        scols = [r["name"] for r in db.execute("PRAGMA table_info(staff)").fetchall()]
-        if "archived_at" not in scols:
-            db.execute("ALTER TABLE staff ADD COLUMN archived_at TEXT;")
-
-        # agencies: reminder_windows (#12)
-        acols2 = [r["name"] for r in db.execute("PRAGMA table_info(agencies)").fetchall()]
-        if "reminder_windows" not in acols2:
-            db.execute("ALTER TABLE agencies ADD COLUMN reminder_windows TEXT;")  # JSON, e.g. "[7,14,30]"
-        if "grace_period_end" not in acols2:
-            db.execute("ALTER TABLE agencies ADD COLUMN grace_period_end TEXT;")  # ISO datetime
-        if "payment_failure_count" not in acols2:
-            db.execute("ALTER TABLE agencies ADD COLUMN payment_failure_count INTEGER NOT NULL DEFAULT 0;")
-        if "last_payment_error" not in acols2:
-            db.execute("ALTER TABLE agencies ADD COLUMN last_payment_error TEXT;")
 
         db.commit()
 
@@ -548,10 +526,6 @@ def get_agency(agency_id: int):
         return db.execute("SELECT * FROM agencies WHERE id=?", (agency_id,)).fetchone()
 
 
-def agency_is_active(agency) -> bool:
-    return agency and agency["billing_status"] == "ACTIVE"
-
-
 def billing_mode(agency) -> str:
     """
     ACTIVE: paid and good
@@ -570,7 +544,7 @@ def can_write(agency) -> bool:
     return mode in ("ACTIVE", "PAST_DUE")
 
 
-AUTO_DOWNGRADE_PLAN = "ESSENTIAL"  # plan to fall back to after grace expires
+AUTO_DOWNGRADE_PLAN = DEFAULT_PLAN  # plan to fall back to after grace expires
 
 
 def auto_expire_grace_if_needed(agency):
@@ -618,6 +592,55 @@ def auto_expire_grace_if_needed(agency):
 def plan_staff_limit(plan: str) -> int:
     plan = (plan or DEFAULT_PLAN).upper()
     return PLAN_LIMITS.get(plan, PLAN_LIMITS[DEFAULT_PLAN])["staff"]
+
+
+def set_auth_session(user_id, username, email, agency_id, agency_name, agency_country, role):
+    """Clear and populate the session with authenticated user data."""
+    session.clear()
+    session.permanent = True
+    session.update({
+        "user_id": user_id,
+        "username": username,
+        "email": email,
+        "agency_id": agency_id,
+        "agency_name": agency_name,
+        "agency_country": agency_country,
+        "role": role,
+    })
+
+
+def save_upload(file, agency_id: int, staff_id: int) -> str:
+    """Validate and save an uploaded file. Returns the absolute path.
+    Raises ValueError on validation failure.
+    """
+    if not allowed_file(file.filename):
+        raise ValueError("File type not allowed.")
+
+    file.seek(0, os.SEEK_END)
+    size = file.tell()
+    file.seek(0)
+    if size > MAX_SIZE:
+        raise ValueError("File too large (max 5MB).")
+
+    safe_name = secure_filename(file.filename)
+    stamp = utcnow().strftime("%Y%m%d%H%M%S")
+    stored_name = f"{agency_id}_{staff_id}_{stamp}_{safe_name}"
+    abs_path = os.path.join(app.config["UPLOAD_FOLDER"], stored_name)
+    file.save(abs_path)
+    return abs_path
+
+
+def insert_document(agency_id: int, staff_id: int, doc_type: str, expiry_date: str, file_path: str = None) -> int:
+    """Insert a document row and return the new document ID."""
+    with get_db() as db:
+        db.execute(
+            """INSERT INTO documents (agency_id, staff_id, doc_type, expiry_date, file_path, uploaded_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (agency_id, staff_id, doc_type, expiry_date, file_path, utcnow().isoformat()),
+        )
+        doc_id = db.execute("SELECT last_insert_rowid() as id").fetchone()["id"]
+        db.commit()
+    return int(doc_id)
 
 
 def require_active_agency(fn):
@@ -1171,17 +1194,8 @@ def signup():
             """, (agency["id"], username)).fetchone()
 
         # Rotate session: clear signup flow keys before setting authenticated session
-        session.clear()
-        session.permanent = True
-        session.update({
-            "user_id": user["id"],
-            "username": user["username"],
-            "email": user["email"],
-            "agency_id": user["agency_id"],
-            "agency_name": user["agency_name"],
-            "agency_country": user["agency_country"],
-            "role": user["role"],
-        })
+        set_auth_session(user["id"], user["username"], user["email"],
+                         user["agency_id"], user["agency_name"], user["agency_country"], user["role"])
 
         audit("AGENCY_CREATE", "agency", session["agency_id"], {"agency_name": agency_name, "country": country})
         audit("USER_CREATE_OWNER", "user", session["user_id"], {"email": email})
@@ -1252,17 +1266,8 @@ def login():
                     agency_country = "UK"
 
         # Rotate session: clear any stale keys from a previous user
-        session.clear()
-        session.permanent = True
-        session.update({
-            "user_id": user_id,
-            "username": user["username"],
-            "email": user["email"],
-            "agency_id": agency_id,
-            "agency_name": agency_name,
-            "agency_country": agency_country,
-            "role": user["role"],
-        })
+        set_auth_session(user_id, user["username"], user["email"],
+                         agency_id, agency_name, agency_country, user["role"])
 
         audit("LOGIN_SUCCESS", "user", user["id"], {"login": "username_or_email"})
 
@@ -1594,24 +1599,11 @@ def staff_profile(staff_id: int):
 
         file_path = None
         if file and file.filename:
-            if not allowed_file(file.filename):
-                flash("File type not allowed.", "error")
+            try:
+                file_path = save_upload(file, agency_id, staff_id)
+            except ValueError as e:
+                flash(str(e), "error")
                 return redirect(url_for("staff_profile", staff_id=staff_id))
-
-            # Enforce size limit
-            file.seek(0, os.SEEK_END)
-            size = file.tell()
-            file.seek(0)
-            if size > MAX_SIZE:
-                flash("File too large (max 5MB).", "error")
-                return redirect(url_for("staff_profile", staff_id=staff_id))
-
-            safe_name = secure_filename(file.filename)
-            stamp = utcnow().strftime("%Y%m%d%H%M%S")
-            stored_name = f"{agency_id}_{staff_id}_{stamp}_{safe_name}"
-            abs_path = os.path.join(app.config["UPLOAD_FOLDER"], stored_name)
-            file.save(abs_path)
-            file_path = abs_path
 
         with get_db() as db:
             staff = db.execute(
@@ -1621,13 +1613,7 @@ def staff_profile(staff_id: int):
             if not staff:
                 return ("Not found", 404)
 
-            db.execute(
-                """INSERT INTO documents (agency_id, staff_id, doc_type, expiry_date, file_path, uploaded_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (agency_id, staff_id, doc_type, expiry_date, file_path, utcnow().isoformat()),
-            )
-            doc_id = db.execute("SELECT last_insert_rowid() as id").fetchone()["id"]
-            db.commit()
+        doc_id = insert_document(agency_id, staff_id, doc_type, expiry_date, file_path)
 
         audit("DOC_CREATE", "document", int(doc_id), {
             "staff_id": staff_id, "doc_type": doc_type, "expiry_date": expiry_date, "has_file": bool(file_path)
@@ -1797,21 +1783,11 @@ def edit_document(doc_id: int):
         file = request.files.get("file")
         file_path = doc["file_path"]
         if file and file.filename:
-            if not allowed_file(file.filename):
-                flash("File type not allowed.", "error")
+            try:
+                file_path = save_upload(file, agency_id, doc["staff_id"])
+            except ValueError as e:
+                flash(str(e), "error")
                 return redirect(url_for("edit_document", doc_id=doc_id))
-            file.seek(0, os.SEEK_END)
-            size = file.tell()
-            file.seek(0)
-            if size > MAX_SIZE:
-                flash("File too large (max 5MB).", "error")
-                return redirect(url_for("edit_document", doc_id=doc_id))
-            safe_name = secure_filename(file.filename)
-            stamp = utcnow().strftime("%Y%m%d%H%M%S")
-            stored_name = f"{agency_id}_{doc['staff_id']}_{stamp}_{safe_name}"
-            abs_path = os.path.join(app.config["UPLOAD_FOLDER"], stored_name)
-            file.save(abs_path)
-            file_path = abs_path
 
         with get_db() as db:
             db.execute("UPDATE documents SET doc_type=?, expiry_date=?, file_path=? WHERE id=? AND agency_id=?",
@@ -1881,26 +1857,12 @@ def bulk_upload(staff_id: int):
     for file in files:
         if not file or not file.filename:
             continue
-        if not allowed_file(file.filename):
+        try:
+            abs_path = save_upload(file, agency_id, staff_id)
+        except ValueError:
             continue
-        file.seek(0, os.SEEK_END)
-        size = file.tell()
-        file.seek(0)
-        if size > MAX_SIZE:
-            continue
-        safe_name = secure_filename(file.filename)
-        stamp = utcnow().strftime("%Y%m%d%H%M%S")
-        stored_name = f"{agency_id}_{staff_id}_{stamp}_{count}_{safe_name}"
-        abs_path = os.path.join(app.config["UPLOAD_FOLDER"], stored_name)
-        file.save(abs_path)
 
-        with get_db() as db:
-            db.execute(
-                """INSERT INTO documents (agency_id, staff_id, doc_type, expiry_date, file_path, uploaded_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (agency_id, staff_id, doc_type, expiry_date, abs_path, utcnow().isoformat()),
-            )
-            db.commit()
+        insert_document(agency_id, staff_id, doc_type, expiry_date, abs_path)
         count += 1
 
     audit("DOC_BULK_UPLOAD", "document", staff_id, {"count": count, "doc_type": doc_type})
@@ -2606,17 +2568,8 @@ def accept_invite(token):
             """, (user_id,)).fetchone()
 
         # Rotate session: clear invite flow keys before setting authenticated session
-        session.clear()
-        session.permanent = True
-        session.update({
-            "user_id": user["id"],
-            "username": user["username"],
-            "email": user["email"],
-            "agency_id": user["agency_id"],
-            "agency_name": user["agency_name"],
-            "agency_country": user["agency_country"],
-            "role": user["role"],
-        })
+        set_auth_session(user["id"], user["username"], user["email"],
+                         user["agency_id"], user["agency_name"], user["agency_country"], user["role"])
 
         audit("INVITE_ACCEPT", "invite", inv["id"], {"email": inv["email"]})
         return redirect(url_for("dashboard"))
@@ -2814,16 +2767,8 @@ def totp_verify():
             return render_template("totp_verify.html")
 
         session.pop("totp_pending_user_id", None)
-        session.permanent = True
-        session.update({
-            "user_id": user["id"],
-            "username": user["username"],
-            "email": user["email"],
-            "agency_id": user["agency_id"],
-            "agency_name": user["agency_name"],
-            "agency_country": user["agency_country"],
-            "role": user["role"],
-        })
+        set_auth_session(user["id"], user["username"], user["email"],
+                         user["agency_id"], user["agency_name"], user["agency_country"], user["role"])
         audit("LOGIN_TOTP_VERIFIED", "user", user["id"], {})
         return redirect(url_for("dashboard"))
 
@@ -2921,26 +2866,14 @@ def staff_self_service(token):
         if not allowed_file(file.filename):
             flash("File type not allowed.", "error")
             return redirect(url_for("staff_self_service", token=token))
-        file.seek(0, os.SEEK_END)
-        size = file.tell()
-        file.seek(0)
-        if size > MAX_SIZE:
-            flash("File too large (max 5MB).", "error")
+
+        try:
+            abs_path = save_upload(file, tok["agency_id"], tok["staff_id"])
+        except ValueError as e:
+            flash(str(e), "error")
             return redirect(url_for("staff_self_service", token=token))
 
-        safe_name = secure_filename(file.filename)
-        stamp = utcnow().strftime("%Y%m%d%H%M%S")
-        stored_name = f"{tok['agency_id']}_{tok['staff_id']}_{stamp}_{safe_name}"
-        abs_path = os.path.join(app.config["UPLOAD_FOLDER"], stored_name)
-        file.save(abs_path)
-
-        with get_db() as db:
-            db.execute(
-                """INSERT INTO documents (agency_id, staff_id, doc_type, expiry_date, file_path, uploaded_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (tok["agency_id"], tok["staff_id"], doc_type, expiry_date, abs_path, utcnow().isoformat()),
-            )
-            db.commit()
+        insert_document(tok["agency_id"], tok["staff_id"], doc_type, expiry_date, abs_path)
 
         flash("Document uploaded successfully. Thank you!", "ok")
         return redirect(url_for("staff_self_service", token=token))
