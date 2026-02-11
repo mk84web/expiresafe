@@ -2305,6 +2305,9 @@ def create_checkout_session():
         flash("APP_BASE_URL not set.", "error")
         return redirect(url_for("billing"))
 
+    TRIAL_DAYS = int(os.environ.get("TRIAL_DAYS", "14"))
+    app.logger.info("TRIAL_DAYS=%s plan=%s", TRIAL_DAYS, plan)
+
     session_obj = stripe.checkout.Session.create(
         mode="subscription",
         customer=customer_id,
@@ -2313,6 +2316,10 @@ def create_checkout_session():
         cancel_url=f"{base_url}/billing",
         allow_promotion_codes=True,
         metadata={"agency_id": str(agency["id"]), "plan": plan},
+        subscription_data={
+            "trial_period_days": TRIAL_DAYS,
+            "metadata": {"agency_id": str(agency["id"]), "plan": plan},
+        },
     )
     return redirect(session_obj.url, code=303)
 

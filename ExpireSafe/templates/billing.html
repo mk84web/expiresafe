@@ -101,6 +101,8 @@
         {% endif %}
       </p>
 
+      <p class="text-xs text-indigo-500 dark:text-indigo-400 font-semibold mt-1">14-Day Free Trial</p>
+
       <form method="POST" action="{{ url_for('create_checkout_session') }}" class="mt-4">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="plan" value="{{ p }}">
