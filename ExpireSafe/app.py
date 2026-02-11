@@ -564,6 +564,11 @@ def billing_mode(agency) -> str:
     """
     if not agency:
         return "INACTIVE"
+
+    # sqlite3.Row -> dict, so .get works everywhere safely
+    if not isinstance(agency, dict):
+        agency = dict(agency)
+
     status = (agency.get("billing_status") or "INACTIVE")
     return str(status).upper()
 
@@ -583,6 +588,9 @@ def auto_expire_grace_if_needed(agency):
     """
     if not agency:
         return
+
+    if not isinstance(agency, dict):
+        agency = dict(agency)
 
     status = (agency.get("billing_status") or "")
     if status != "GRACE_PERIOD":
@@ -2139,8 +2147,8 @@ def billing():
 
     # Check if subscription is scheduled for cancellation
     cancel_at_period_end = False
-    sub_id = agency.get("stripe_subscription_id") if agency else None
-    if sub_id and agency.get("billing_status") == "ACTIVE":
+    sub_id = agency["stripe_subscription_id"] if agency else None
+    if sub_id and agency["billing_status"] == "ACTIVE":
         try:
             import stripe
             stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
@@ -2152,9 +2160,9 @@ def billing():
 
     app.logger.info("BILLING DEBUG agency_id=%s status=%s plan=%s sub=%s",
                     agency_id,
-                    agency.get("billing_status"),
-                    agency.get("plan"),
-                    agency.get("stripe_subscription_id"))
+                    agency["billing_status"] if agency else None,
+                    agency["plan"] if agency else None,
+                    agency["stripe_subscription_id"] if agency else None)
 
     prices = {
         "ESSENTIAL": "£49/mo",
@@ -2249,6 +2257,8 @@ def create_checkout_session():
     else:
         agency = row
 
+    agency = row_to_dict(agency)
+
     # Stripe customer id (will be None/empty if not created yet)
     customer_id = agency["stripe_customer_id"]
 
@@ -2268,8 +2278,8 @@ def create_checkout_session():
         db.commit()
 
     # --- Prevent duplicate subscriptions ---
-    existing_sub_id = agency.get("stripe_subscription_id")
-    if existing_sub_id and agency.get("billing_status") == "ACTIVE":
+    existing_sub_id = agency["stripe_subscription_id"]
+    if existing_sub_id and agency["billing_status"] == "ACTIVE":
         # Check if the existing subscription is still active in Stripe
         try:
             existing_sub = stripe.Subscription.retrieve(existing_sub_id)
@@ -2328,7 +2338,7 @@ def billing_cancel():
 
     agency_id = session_agency_id()
     agency = get_agency(agency_id)
-    sub_id = agency.get("stripe_subscription_id") if agency else None
+    sub_id = agency["stripe_subscription_id"] if agency else None
 
     if not sub_id:
         flash("No active subscription found.", "error")
@@ -2363,7 +2373,7 @@ def billing_reactivate():
 
     agency_id = session_agency_id()
     agency = get_agency(agency_id)
-    sub_id = agency.get("stripe_subscription_id") if agency else None
+    sub_id = agency["stripe_subscription_id"] if agency else None
 
     if not sub_id:
         flash("No subscription found.", "error")
