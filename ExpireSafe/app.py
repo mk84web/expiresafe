@@ -651,6 +651,9 @@ def require_active_agency(fn):
         if "agency_id" not in session:
             return redirect(url_for("login"))
 
+        if os.environ.get("BILLING_ENFORCEMENT", "true").lower() == "false":
+            return fn(*args, **kwargs)
+
         agency = get_agency(int(session["agency_id"]))
         auto_expire_grace_if_needed(agency)
         # Re-fetch after possible auto-downgrade
