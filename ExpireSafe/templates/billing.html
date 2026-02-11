@@ -94,7 +94,11 @@
       </div>
 
       <p class="text-sm text-slate-600 dark:text-slate-400 mt-2">
-        Staff limit: {{ limits[p]["staff"] }}
+        {% if p == 'GOVERNED' %}
+        Up to 250+ staff
+        {% else %}
+        Up to {{ limits[p]["staff"] }} staff
+        {% endif %}
       </p>
 
       <form method="POST" action="{{ url_for('create_checkout_session') }}" class="mt-4">

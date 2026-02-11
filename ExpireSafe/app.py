@@ -2165,9 +2165,9 @@ def billing():
                     agency["stripe_subscription_id"] if agency else None)
 
     prices = {
-        "ESSENTIAL": "£49/mo",
-        "ENFORCED": "£99/mo",
-        "GOVERNED": "£199/mo",
+        "ESSENTIAL": "£39/mo",
+        "ENFORCED": "£79/mo",
+        "GOVERNED": "£149/mo",
     }
 
     return render_template(
