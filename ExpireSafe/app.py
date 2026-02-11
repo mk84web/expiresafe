@@ -993,6 +993,36 @@ def inject_superadmin():
     return {"is_superadmin": session.get("email") == sa_email and sa_email != ""}
 
 
+@app.context_processor
+def inject_billing_banner():
+    agency_id = session.get("agency_id")
+    if not agency_id:
+        return {"billing_banner": None}
+
+    agency = get_agency(int(agency_id))
+    if not agency:
+        return {"billing_banner": None}
+
+    mode = billing_mode(agency)
+    banner = None
+    if mode == "PAST_DUE":
+        # Show everywhere
+        banner = {
+            "type": "warning",
+            "title": "Payment issue",
+            "text": "Your subscription payment failed. Please update billing to avoid read-only mode."
+        }
+    elif mode == "GRACE_PERIOD":
+        # Optional: also show everywhere (recommended)
+        banner = {
+            "type": "danger",
+            "title": "Read-only mode",
+            "text": "Your account is in grace period. Most changes are locked until billing is active."
+        }
+
+    return {"billing_banner": banner}
+
+
 # ---------------- ERROR HANDLERS ----------------
 
 @app.errorhandler(404)
