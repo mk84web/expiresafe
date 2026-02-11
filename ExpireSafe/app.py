@@ -570,6 +570,51 @@ def can_write(agency) -> bool:
     return mode in ("ACTIVE", "PAST_DUE")
 
 
+AUTO_DOWNGRADE_PLAN = "ESSENTIAL"  # plan to fall back to after grace expires
+
+
+def auto_expire_grace_if_needed(agency):
+    """
+    If GRACE_PERIOD is expired -> set INACTIVE and downgrade plan.
+    Runs "lazily" on requests, so no scheduler needed.
+    """
+    if not agency:
+        return
+
+    status = (agency.get("billing_status") if isinstance(agency, dict) else agency["billing_status"]) or ""
+    if status != "GRACE_PERIOD":
+        return
+
+    grace_end = (agency.get("grace_period_end") if isinstance(agency, dict) else agency["grace_period_end"])
+    if not grace_end:
+        return
+
+    try:
+        grace_dt = datetime.fromisoformat(str(grace_end))
+    except Exception:
+        return
+
+    if utcnow() >= grace_dt:
+        agency_id = int(agency.get("id") if isinstance(agency, dict) else agency["id"])
+
+        # read from_status for audit
+        with get_db() as db:
+            cur = db.execute("SELECT billing_status, plan FROM agencies WHERE id=?", (agency_id,)).fetchone()
+            from_status = (cur["billing_status"] if cur else None) or "UNKNOWN"
+
+            db.execute("""
+                UPDATE agencies
+                SET billing_status='INACTIVE',
+                    plan=?,
+                    stripe_subscription_id=NULL,
+                    current_period_end=NULL
+                WHERE id=?
+            """, (AUTO_DOWNGRADE_PLAN, agency_id))
+            db.commit()
+
+        audit_billing_transition(agency_id, from_status, "INACTIVE", {"auto": True, "downgrade_plan": AUTO_DOWNGRADE_PLAN})
+
+
 def plan_staff_limit(plan: str) -> int:
     plan = (plan or DEFAULT_PLAN).upper()
     return PLAN_LIMITS.get(plan, PLAN_LIMITS[DEFAULT_PLAN])["staff"]
@@ -581,6 +626,9 @@ def require_active_agency(fn):
         if "agency_id" not in session:
             abort(403)
 
+        agency = get_agency(int(session["agency_id"]))
+        auto_expire_grace_if_needed(agency)
+        # Re-fetch after possible auto-downgrade
         agency = get_agency(int(session["agency_id"]))
         mode = billing_mode(agency)
 
@@ -694,6 +742,32 @@ def audit(action: str, entity_type: str, entity_id=None, metadata=None):
                (agency_id, user_id, username, action, entity_type, entity_id, ip_address, user_agent, metadata_json, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (agency_id, user_id, username, action, entity_type, entity_id, ip, ua, meta_str, utcnow().isoformat()),
+        )
+        db.commit()
+
+
+def audit_billing_transition(agency_id: int, from_status: str, to_status: str, meta: dict = None):
+    meta = meta or {}
+    meta.update({"from": from_status, "to": to_status})
+
+    with get_db() as db:
+        # "SYSTEM" entry — doesn't rely on session being set
+        db.execute(
+            """INSERT INTO audit_log
+               (agency_id, user_id, username, action, entity_type, entity_id, ip_address, user_agent, metadata_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                int(agency_id),
+                0,
+                "SYSTEM",
+                "BILLING_STATE_CHANGE",
+                "agency",
+                int(agency_id),
+                "",
+                "",
+                json.dumps(meta, ensure_ascii=False)[:4000],
+                utcnow().isoformat(),
+            ),
         )
         db.commit()
 
@@ -2330,8 +2404,11 @@ def stripe_webhook():
     obj = event["data"]["object"]
 
     def set_active(agency_id: int, plan: str, sub_id: str, period_end_unix: int):
-        period_end_iso = unix_to_naive_utc(period_end_unix)
         with get_db() as db:
+            current = db.execute("SELECT billing_status FROM agencies WHERE id=?", (agency_id,)).fetchone()
+            from_status = (current["billing_status"] if current else None) or "UNKNOWN"
+
+            period_end_iso = unix_to_naive_utc(period_end_unix)
             db.execute("""
                 UPDATE agencies
                 SET billing_status='ACTIVE',
@@ -2345,10 +2422,15 @@ def stripe_webhook():
             """, (plan, sub_id, period_end_iso, agency_id))
             db.commit()
 
+        audit_billing_transition(agency_id, from_status, "ACTIVE", {"plan": plan, "sub_id": sub_id})
+
     def set_grace_period(agency_id: int):
         """Transition agency to grace period instead of immediate lockout."""
         grace_end = (utcnow() + timedelta(days=GRACE_PERIOD_DAYS)).isoformat()
         with get_db() as db:
+            current = db.execute("SELECT billing_status FROM agencies WHERE id=?", (agency_id,)).fetchone()
+            from_status = (current["billing_status"] if current else None) or "UNKNOWN"
+
             db.execute("""
                 UPDATE agencies
                 SET billing_status='GRACE_PERIOD',
@@ -2357,9 +2439,14 @@ def stripe_webhook():
             """, (grace_end, agency_id))
             db.commit()
 
+        audit_billing_transition(agency_id, from_status, "GRACE_PERIOD", {"grace_end": grace_end})
+
     def set_past_due(agency_id: int, error_msg: str = None):
         """Mark agency as past due (payment failed but subscription not yet cancelled)."""
         with get_db() as db:
+            current = db.execute("SELECT billing_status FROM agencies WHERE id=?", (agency_id,)).fetchone()
+            from_status = (current["billing_status"] if current else None) or "UNKNOWN"
+
             db.execute("""
                 UPDATE agencies
                 SET billing_status='PAST_DUE',
@@ -2369,8 +2456,13 @@ def stripe_webhook():
             """, (error_msg, agency_id))
             db.commit()
 
+        audit_billing_transition(agency_id, from_status, "PAST_DUE", {"error_msg": error_msg})
+
     def set_inactive(agency_id: int):
         with get_db() as db:
+            current = db.execute("SELECT billing_status FROM agencies WHERE id=?", (agency_id,)).fetchone()
+            from_status = (current["billing_status"] if current else None) or "UNKNOWN"
+
             db.execute("""
                 UPDATE agencies
                 SET billing_status='INACTIVE',
@@ -2379,6 +2471,8 @@ def stripe_webhook():
                 WHERE id=?
             """, (agency_id,))
             db.commit()
+
+        audit_billing_transition(agency_id, from_status, "INACTIVE")
 
     try:
         # Checkout complete -> subscription created
