@@ -76,33 +76,38 @@
   {% endif %}
 
   {# ---- PLAN CARDS ---- #}
-  <div class="grid md:grid-cols-3 gap-4">
+  <div class="grid md:grid-cols-3 gap-4 mt-6">
+
     {% for p in ["ESSENTIAL","ENFORCED","GOVERNED"] %}
-    <div class="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-5 {{ 'ring-2 ring-indigo-500' if agency.plan == p and agency.billing_status == 'ACTIVE' else '' }}">
-      <div class="font-semibold text-lg">{{ p }}</div>
-      <div class="text-sm text-slate-600 dark:text-slate-400 mt-1 mb-4">
-        Up to {{ limits[p]["staff"] }} staff
+    <div class="border rounded-lg p-4 dark:border-slate-700">
+      <div class="flex items-baseline justify-between">
+        <h3 class="text-lg font-semibold text-slate-900 dark:text-slate-100">{{ p.title() }}</h3>
+        <div class="text-slate-700 dark:text-slate-300 font-bold">
+          {{ prices[p] }}
+        </div>
       </div>
 
-      <form method="post" action="{{ url_for('create_checkout_session') }}">
+      <p class="text-sm text-slate-600 dark:text-slate-400 mt-2">
+        Staff limit: {{ limits[p]["staff"] }}
+      </p>
+
+      <form method="POST" action="{{ url_for('create_checkout_session') }}" class="mt-4">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="plan" value="{{ p }}">
-        {% if agency.plan == p and agency.billing_status == 'ACTIVE' and not cancel_at_period_end %}
-        <button disabled class="w-full bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400 rounded px-4 py-2 text-sm cursor-not-allowed">
-          Current Plan
-        </button>
+
+        {% if agency and agency.plan == p and agency.billing_status == 'ACTIVE' and not cancel_at_period_end %}
+          <button disabled class="w-full bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400 rounded px-4 py-2 text-sm cursor-not-allowed">
+            Current Plan
+          </button>
         {% else %}
-        <button class="w-full bg-indigo-600 text-white rounded px-4 py-2 text-sm hover:bg-indigo-700">
-          {% if agency.billing_status not in ('ACTIVE',) %}
-          Activate reminders &amp; reports
-          {% else %}
-          Switch to {{ p }}
-          {% endif %}
-        </button>
+          <button type="submit" class="w-full bg-indigo-600 text-white rounded px-4 py-2 text-sm hover:bg-indigo-700">
+            Choose {{ p.title() }}
+          </button>
         {% endif %}
       </form>
     </div>
     {% endfor %}
+
   </div>
 
   {# ---- CANCELLATION / REACTIVATION SECTION ---- #}

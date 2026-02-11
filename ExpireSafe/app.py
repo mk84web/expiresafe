@@ -2125,9 +2125,9 @@ def billing():
                     agency.get("stripe_subscription_id"))
 
     prices = {
-        "ESSENTIAL": os.environ.get("PRICE_ESSENTIAL", "£49/mo"),
-        "ENFORCED": os.environ.get("PRICE_ENFORCED", "£99/mo"),
-        "GOVERNED": os.environ.get("PRICE_GOVERNED", "£199/mo"),
+        "ESSENTIAL": "£49/mo",
+        "ENFORCED": "£99/mo",
+        "GOVERNED": "£199/mo",
     }
 
     return render_template(
