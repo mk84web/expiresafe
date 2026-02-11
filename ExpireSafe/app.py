@@ -682,6 +682,9 @@ def require_write_access(fn):
         if "agency_id" not in session:
             abort(403)
 
+        if os.environ.get("BILLING_ENFORCEMENT", "false").lower() == "false":
+            return fn(*args, **kwargs)
+
         agency = get_agency(int(session["agency_id"]))
         mode = billing_mode(agency)
 
@@ -1442,7 +1445,6 @@ def dashboard():
 @app.route("/users", methods=["GET", "POST"])
 @login_required
 @owner_required
-@require_write_access
 def users():
     agency_id = session_agency_id()
 
@@ -1500,7 +1502,6 @@ def users():
 @app.route("/staff", methods=["GET", "POST"])
 @login_required
 @require_active_agency
-@require_write_access
 def staff_list():
     agency_id = session_agency_id()
 
@@ -2674,7 +2675,6 @@ def toggle_user_active(uid: int):
 @app.route("/settings/notifications", methods=["GET", "POST"])
 @login_required
 @owner_required
-@require_write_access
 def notification_prefs():
     agency_id = session_agency_id()
 
