@@ -2166,8 +2166,8 @@ def billing():
 
     prices = {
         "ESSENTIAL": "£39/mo",
-        "ENFORCED": "£79/mo",
-        "GOVERNED": "£149/mo",
+        "ENFORCED": "£99/mo",
+        "GOVERNED": "£199/mo",
     }
 
     return render_template(
